@@ -1,8 +1,8 @@
 """Self-updating RAG entrypoint for AMDC.
 
-Embeds the user's query, scores it against existing Silver page embeddings, and
-either returns the matching row_ids or kicks off a fresh crawl + Bronze +
-Silver build before returning matches.
+Embeds the user's query, scores it against Silver chunk embeddings, joins the
+best chunk per article back to Silver pages for context, and either returns
+matching articles or kicks off a fresh crawl + Bronze + Silver build first.
 
 Usage:
     uv run python run_amdc.py "semiconductor supply chain"
@@ -13,33 +13,66 @@ Usage:
 
 from __future__ import annotations
 
-import asyncio
-import logging
-from pathlib import Path
+# torch 2.2.2 (Intel Mac ceiling — see CLAUDE.md) was compiled against NumPy 1.x
+# while we resolve NumPy 2.x as a transitive dep. The mismatch is benign for
+# this code path. NumPy writes the multi-line compat banner directly to stderr
+# from C (bypassing the warnings module), so we capture stderr around the
+# heavy import chain and drop the known noise. The companion torch UserWarning
+# does flow through warnings, so a regular filter handles that one.
+import io  # noqa: E402
+import sys  # noqa: E402
+import warnings  # noqa: E402
 
-import numpy as np
-import polars as pl
-import typer
-from deltalake import DeltaTable
+warnings.filterwarnings("ignore", message=r".*Failed to initialize NumPy.*")
 
-from amdc.crawler import crawl_all
-from amdc.extract import normalize
-from amdc.store import write_parquet
-from amdc_lake.bronze import backfill_parquet
-from amdc_lake.embedder import BgeM3Embedder
-from amdc_lake.paths import DEFAULT_LAKE_DIR, silver_pages_path
-from amdc_lake.silver import build_silver
+_stderr_orig = sys.stderr
+sys.stderr = io.StringIO()
+try:
+    import asyncio
+    import logging
+    from pathlib import Path
+
+    import numpy as np
+    import polars as pl
+    import typer
+    from deltalake import DeltaTable
+
+    from amdc.crawler import crawl_all
+    from amdc.extract import normalize
+    from amdc.store import write_parquet
+    from amdc_lake.bronze import backfill_parquet
+    from amdc_lake.embedder import BgeM3Embedder
+    from amdc_lake.paths import (
+        DEFAULT_LAKE_DIR,
+        silver_chunks_path,
+        silver_pages_path,
+    )
+    from amdc_lake.silver import build_silver
+finally:
+    sys.stderr = _stderr_orig
+    # Captured stderr is discarded — the only writers during the import chain
+    # are NumPy (compat banner) and torch (Failed to initialize NumPy). If an
+    # import raises, the traceback prints to the restored stderr after this
+    # finally block runs.
 
 app = typer.Typer(add_completion=False, help="AMDC self-updating RAG entrypoint")
 log = logging.getLogger(__name__)
 
-_RESULT_COLUMNS = ["row_id", "similarity", "title", "source_url", "crawled_at"]
+_RESULT_COLUMNS = [
+    "row_id",
+    "similarity",
+    "title",
+    "source_url",
+    "crawled_at",
+    "text",
+]
 _EMPTY_RESULT_SCHEMA = {
     "row_id": pl.Utf8,
     "similarity": pl.Float32,
     "title": pl.Utf8,
     "source_url": pl.Utf8,
     "crawled_at": pl.Utf8,
+    "text": pl.Utf8,
 }
 
 
@@ -54,29 +87,58 @@ def _search(
     top_k: int,
     embedder: BgeM3Embedder,
 ) -> pl.DataFrame:
+    chunks_path = silver_chunks_path(lake_dir)
     pages_path = silver_pages_path(lake_dir)
-    if not pages_path.exists():
+    if not chunks_path.exists() or not pages_path.exists():
+        log.info("cache: silver is empty (no chunks indexed yet)")
         return _empty_results()
 
-    table = DeltaTable(str(pages_path))
-    df = pl.from_arrow(
-        table.to_pyarrow_table(
-            columns=["page_id", "title", "source_url", "crawled_at", "embedding"]
+    chunks = pl.from_arrow(
+        DeltaTable(str(chunks_path)).to_pyarrow_table(
+            columns=["page_id", "embedding"]
         )
     )
-    if df.is_empty():
+    if chunks.is_empty():
+        log.info("cache: silver is empty (no chunks indexed yet)")
         return _empty_results()
 
-    embeddings = np.asarray(df["embedding"].to_list(), dtype=np.float32)
+    embeddings = np.asarray(chunks["embedding"].to_list(), dtype=np.float32)
     query_vec = np.asarray(embedder.embed([query])[0], dtype=np.float32)
     sims = embeddings @ query_vec
 
-    return (
-        df.drop("embedding")
+    n_chunks_above = int((sims > threshold).sum())
+    max_sim = float(sims.max()) if sims.size else 0.0
+    log.info(
+        "cache: scanned %d chunks (%d pages), %d chunks above threshold=%.2f (max sim=%.3f)",
+        len(chunks),
+        chunks["page_id"].n_unique(),
+        n_chunks_above,
+        threshold,
+        max_sim,
+    )
+
+    chunk_hits = (
+        chunks.drop("embedding")
         .with_columns(pl.Series("similarity", sims, dtype=pl.Float32))
         .filter(pl.col("similarity") > threshold)
-        .sort("similarity", descending=True)
+    )
+    if chunk_hits.is_empty():
+        return _empty_results()
+
+    best_per_page = (
+        chunk_hits.sort("similarity", descending=True)
+        .unique(subset=["page_id"], keep="first")
         .head(top_k)
+    )
+
+    pages = pl.from_arrow(
+        DeltaTable(str(pages_path)).to_pyarrow_table(
+            columns=["page_id", "title", "source_url", "crawled_at", "text"]
+        )
+    )
+    return (
+        best_per_page.join(pages, on="page_id", how="inner")
+        .sort("similarity", descending=True)
         .rename({"page_id": "row_id"})
         .select(_RESULT_COLUMNS)
     )
