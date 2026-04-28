@@ -5,7 +5,6 @@ It lets you search existing market articles in the AMDC lakehouse; when cached m
 the orchestrator can crawl fresh sources, run Bronze data-quality checks, rebuild Silver embeddings,
 and return updated news article results from the web.
 
-
 Dockerized Streamlit app and Python CLI that run `crawl4ai`'s
 `BestFirstCrawlingStrategy` (with BM25 content filtering and keyword scoring)
 against predefined market-data sites, then write results to parquet for

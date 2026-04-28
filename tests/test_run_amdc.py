@@ -195,7 +195,6 @@ def test_format_quality_runs_sorts_and_humanizes_json() -> None:
 
     assert formatted.get_column("Run ID").to_list() == ["new", "old"]
     newest = formatted.row(0, named=True)
-    assert newest["Status"] == "WARN"
     assert newest["Checks Failed"] == "text: 2 failed (min_length)"
     assert "finviz.com: rows" in newest["Drift Findings"]
     assert newest["Null Columns"] == "date_published: 2; title: 1"

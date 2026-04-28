@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import polars as pl
 import streamlit as st
@@ -24,32 +23,6 @@ _RAW_DQ_COLUMNS = [
     "Raw Null Counts",
     "Raw Duplicate Clusters",
 ]
-
-
-class _ListLogHandler(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__(level=logging.INFO)
-        self.messages: list[str] = []
-        self.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(self.format(record))
-
-
-@contextmanager
-def _capture_info_logs() -> Iterator[_ListLogHandler]:
-    handler = _ListLogHandler()
-    root = logging.getLogger()
-    previous_level = root.level
-    root.addHandler(handler)
-    root.setLevel(min(previous_level, logging.INFO))
-    try:
-        yield handler
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(previous_level)
 
 
 @st.cache_resource(show_spinner="Loading embedding model...")
@@ -176,7 +149,6 @@ def _empty_quality_display() -> pl.DataFrame:
             "Run Started": pl.Utf8,
             "Run Finished": pl.Utf8,
             "Layer": pl.Utf8,
-            "Status": pl.Utf8,
             "Rows In": pl.Int64,
             "Rows Passed": pl.Int64,
             "Rows Failed": pl.Int64,
@@ -209,7 +181,6 @@ def _format_quality_runs(runs: pl.DataFrame) -> pl.DataFrame:
                 "Run Started": row.get("started_at"),
                 "Run Finished": row.get("finished_at"),
                 "Layer": row.get("layer"),
-                "Status": (row.get("status") or "").upper(),
                 "Rows In": row.get("rows_in"),
                 "Rows Passed": row.get("rows_passed"),
                 "Rows Failed": row.get("rows_failed"),
@@ -267,7 +238,7 @@ digraph {
 def _render_header() -> None:
     st.title("Adaptive Market Data Crawler")
     st.write(
-        "This tool is build to assist a researcher who is looking to retrieve sample data for building an NLP pipeline."
+        "This tool is built to assist a researcher who is looking to retrieve sample data for building an NLP pipeline."
     )
     st.write(
         "It lets you search existing market articles in the AMDC lakehouse. When cached matches are "
@@ -279,7 +250,11 @@ def _render_header() -> None:
 
 def _render_search_tab() -> None:
     with st.form("amdc_search"):
-        query = st.text_input("Search", max_chars=200)
+        query = st.text_input(
+            "Search",
+            max_chars=200,
+            placeholder="fed fund rate or Canada EU relations",
+        )
         no_crawl = st.checkbox("No crawl", value=False)
         threshold = st.select_slider(
             "Cosine similarity threshold",
@@ -298,22 +273,20 @@ def _render_search_tab() -> None:
         st.warning("Enter a search query.")
         return
 
-    with st.spinner("Running AMDC query..."):
-        with _capture_info_logs() as logs:
-            result = orchestrate_query(
-                query,
-                threshold=threshold,
-                min_articles=DEFAULT_MIN_ARTICLES,
-                top_k=DEFAULT_TOP_K,
-                no_crawl=no_crawl,
-                embedder=_get_embedder(),
-            )
+    with st.spinner(
+        "Running AMDC pipeline... long crawls can take a while; "
+        "check console logs for live progress."
+    ):
+        result = orchestrate_query(
+            query,
+            threshold=threshold,
+            min_articles=DEFAULT_MIN_ARTICLES,
+            top_k=DEFAULT_TOP_K,
+            no_crawl=no_crawl,
+            embedder=_get_embedder(),
+        )
 
     st.info(result.status_message)
-
-    if result.crawled:
-        with st.expander("Crawler logs", expanded=False):
-            st.code("\n".join(logs.messages) or "No logs captured.", language="text")
 
     _render_results(result)
 
@@ -325,14 +298,12 @@ def _render_quality_tab() -> None:
         st.info("No data quality runs found at data/lakehouse/_quality/runs.")
         return
 
-    statuses = formatted.get_column("Status").unique().sort().to_list()
     with st.sidebar:
         st.header("Data Quality")
-        selected_statuses = st.multiselect("Status", statuses, default=statuses)
         max_rows = st.selectbox("Max rows", [10, 25, 50, 100], index=1)
         show_raw = st.checkbox("Show raw JSON detail columns", value=False)
 
-    display = formatted.filter(pl.col("Status").is_in(selected_statuses)).head(max_rows)
+    display = formatted.head(max_rows)
     if not show_raw:
         display = display.drop(_RAW_DQ_COLUMNS)
 
