@@ -120,6 +120,24 @@ docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler silver-build --lake-dir /app/data/lakehouse
 ```
 
+## Self-updating search UI
+
+`run_amdc.py` searches the Silver chunk cache and, when too few articles clear
+the similarity threshold, can run a fresh crawl plus Bronze/Silver rebuild
+before returning results. A lightweight Streamlit wrapper is available for that
+same orchestrator path:
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+The UI is titled `Adaptive Market Data Crawler`, includes a process-flow
+diagram, and splits the experience into Search and Data Quality tabs. Search
+caps text at 200 characters, exposes `no_crawl` and `threshold`, keeps
+`min_articles=10` and `top_k=20`, and displays matches in an interactive
+dataframe. The Data Quality tab reads `_quality/runs`, sorts runs newest-first,
+and turns nested check, drift, null, and duplicate-cluster JSON into readable
+columns with sidebar filters.
 ## Self-updating RAG query
 
 `run_amdc.py` is a query-time entrypoint that closes the loop between the

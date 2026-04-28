@@ -30,6 +30,7 @@ sys.stderr = io.StringIO()
 try:
     import asyncio
     import logging
+    from dataclasses import dataclass
     from pathlib import Path
 
     import numpy as np
@@ -74,6 +75,22 @@ _EMPTY_RESULT_SCHEMA = {
     "crawled_at": pl.Utf8,
     "text": pl.Utf8,
 }
+
+
+@dataclass(frozen=True)
+class QueryResult:
+    query: str
+    hits: pl.DataFrame
+    initial_matches: int
+    crawled: bool
+    threshold: float
+    min_articles: int
+    top_k: int
+    status_message: str
+
+    @property
+    def final_matches(self) -> int:
+        return len(self.hits)
 
 
 def _empty_results() -> pl.DataFrame:
@@ -168,6 +185,60 @@ def _trigger_pipeline(query: str, data_dir: Path, lake_dir: Path) -> None:
     )
 
 
+def orchestrate_query(
+    query: str,
+    *,
+    threshold: float = 0.5,
+    min_articles: int = 10,
+    top_k: int = 20,
+    data_dir: Path = Path("data"),
+    lake_dir: Path = DEFAULT_LAKE_DIR,
+    force_crawl: bool = False,
+    no_crawl: bool = False,
+    embedder: BgeM3Embedder | None = None,
+) -> QueryResult:
+    if force_crawl and no_crawl:
+        raise ValueError("--force-crawl and --no-crawl are mutually exclusive")
+
+    embedder = embedder or BgeM3Embedder()
+
+    if force_crawl:
+        hits = _empty_results()
+    else:
+        hits = _search(query, lake_dir, threshold, top_k, embedder)
+
+    initial_matches = len(hits)
+    should_crawl = force_crawl or (initial_matches < min_articles and not no_crawl)
+    if should_crawl:
+        status_message = (
+            f"cache miss ({initial_matches} < {min_articles} articles above "
+            f"{threshold}); crawling..."
+        )
+        _trigger_pipeline(query, data_dir, lake_dir)
+        hits = _search(query, lake_dir, threshold, top_k, embedder)
+    elif initial_matches < min_articles:
+        status_message = (
+            f"cache below min_articles ({initial_matches} < {min_articles}) but "
+            f"--no-crawl set; returning what we have."
+        )
+    else:
+        status_message = (
+            f"cache hit ({initial_matches} >= {min_articles} articles above "
+            f"{threshold}); returning cached matches."
+        )
+
+    return QueryResult(
+        query=query,
+        hits=hits,
+        initial_matches=initial_matches,
+        crawled=should_crawl,
+        threshold=threshold,
+        min_articles=min_articles,
+        top_k=top_k,
+        status_message=status_message,
+    )
+
+
 @app.command()
 def run(
     query: str = typer.Argument(..., help="Search query"),
@@ -196,33 +267,25 @@ def run(
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    embedder = BgeM3Embedder()
-
-    if force_crawl:
-        hits = _empty_results()
-    else:
-        hits = _search(query, lake_dir, threshold, top_k, embedder)
-
-    should_crawl = force_crawl or (len(hits) < min_articles and not no_crawl)
-    if should_crawl:
-        typer.echo(
-            f"cache miss ({len(hits)} < {min_articles} articles above {threshold}); "
-            f"crawling..."
-        )
-        _trigger_pipeline(query, data_dir, lake_dir)
-        hits = _search(query, lake_dir, threshold, top_k, embedder)
-    elif len(hits) < min_articles:
-        typer.echo(
-            f"cache below min_articles ({len(hits)} < {min_articles}) but "
-            f"--no-crawl set; returning what we have."
-        )
+    result = orchestrate_query(
+        query,
+        threshold=threshold,
+        min_articles=min_articles,
+        top_k=top_k,
+        data_dir=data_dir,
+        lake_dir=lake_dir,
+        force_crawl=force_crawl,
+        no_crawl=no_crawl,
+    )
+    if result.crawled or result.initial_matches < min_articles:
+        typer.echo(result.status_message)
 
     typer.echo(
-        f"query={query!r} matches={len(hits)} threshold={threshold} "
+        f"query={query!r} matches={result.final_matches} threshold={threshold} "
         f"min_articles={min_articles}"
     )
     with pl.Config(tbl_rows=top_k, tbl_cols=-1, fmt_str_lengths=80, tbl_width_chars=200):
-        print(hits)
+        print(result.hits)
 
 
 if __name__ == "__main__":

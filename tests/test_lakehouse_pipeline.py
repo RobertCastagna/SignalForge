@@ -60,10 +60,7 @@ def test_sha256_id_is_stable_and_prefixed() -> None:
 
 
 def test_normalize_url_strips_query_fragment_and_lowercases_host() -> None:
-    assert (
-        normalize_url("https://CNBC.com/fed?utm=x#frag")
-        == "https://cnbc.com/fed"
-    )
+    assert normalize_url("https://CNBC.com/fed?utm=x#frag") == "https://cnbc.com/fed"
     assert (
         normalize_url("HTTPS://Investing.COM/news/Markets/")
         == "https://investing.com/news/Markets"
