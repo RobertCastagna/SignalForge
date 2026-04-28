@@ -68,8 +68,10 @@ def test_cli_bronze_backfill_writes_rows_and_pipeline_run(tmp_path: Path) -> Non
         lake_app,
         [
             "bronze-backfill",
-            "--input-dir", str(input_dir),
-            "--lake-dir", str(lake_dir),
+            "--input-dir",
+            str(input_dir),
+            "--lake-dir",
+            str(lake_dir),
         ],
     )
 
@@ -98,8 +100,10 @@ def test_cli_bronze_backfill_no_validate_skips_quality_run(tmp_path: Path) -> No
         lake_app,
         [
             "bronze-backfill",
-            "--input-dir", str(input_dir),
-            "--lake-dir", str(lake_dir),
+            "--input-dir",
+            str(input_dir),
+            "--lake-dir",
+            str(lake_dir),
             "--no-validate",
         ],
     )
@@ -143,10 +147,14 @@ def test_cli_silver_build_writes_pages_and_chunks_with_mocked_embedder(
         lake_app,
         [
             "silver-build",
-            "--lake-dir", str(lake_dir),
-            "--batch-size", "2",
-            "--chunk-tokens", "3",
-            "--chunk-overlap", "1",
+            "--lake-dir",
+            str(lake_dir),
+            "--batch-size",
+            "2",
+            "--chunk-tokens",
+            "3",
+            "--chunk-overlap",
+            "1",
         ],
     )
 

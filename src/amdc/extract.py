@@ -1,4 +1,5 @@
 """Normalize raw crawl4ai page payloads into flat records for polars."""
+
 from __future__ import annotations
 
 import re
@@ -72,7 +73,9 @@ def _extract_body(page: dict) -> str:
 
 
 def _extract_url(page: dict) -> str | None:
-    return _first(page.get("url"), page.get("source_url"), page.get("_source_start_url"))
+    return _first(
+        page.get("url"), page.get("source_url"), page.get("_source_start_url")
+    )
 
 
 def _extract_score(page: dict) -> float | None:

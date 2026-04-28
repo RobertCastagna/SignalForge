@@ -1,4 +1,5 @@
 """Lakehouse path conventions."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,6 +45,11 @@ def pipeline_runs_path(lake_dir: Path) -> Path:
 
 
 def ensure_layers(lake_dir: Path) -> None:
-    for layer in (BRONZE_LAYER, SILVER_LAYER, GOLD_LAYER, QUALITY_LAYER, PIPELINE_LAYER):
+    for layer in (
+        BRONZE_LAYER,
+        SILVER_LAYER,
+        GOLD_LAYER,
+        QUALITY_LAYER,
+        PIPELINE_LAYER,
+    ):
         (lake_dir / layer).mkdir(parents=True, exist_ok=True)
-

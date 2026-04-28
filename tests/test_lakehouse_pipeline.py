@@ -90,9 +90,15 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
     assert row_count == 1
     assert bronze.height == 1
     assert bronze.select("bronze_id").item().startswith("bronze_")
-    assert bronze.select("source_file").item().endswith("market_data_20260428T000000Z.parquet")
+    assert (
+        bronze.select("source_file")
+        .item()
+        .endswith("market_data_20260428T000000Z.parquet")
+    )
 
-    runs = pl.from_arrow(DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table())
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
     bronze_runs = runs.filter(pl.col("stage") == "bronze")
     assert bronze_runs.height == 1
     bronze_row = bronze_runs.row(0, named=True)
@@ -191,16 +197,23 @@ def test_build_chunks_validates_chunk_settings_and_embeds_rows() -> None:
 
     assert chunks.height == 2
     assert chunks.select("chunk_index").to_series().to_list() == [0, 1]
-    assert chunks.select("embedding_model").to_series().to_list() == [MODEL_NAME, MODEL_NAME]
+    assert chunks.select("embedding_model").to_series().to_list() == [
+        MODEL_NAME,
+        MODEL_NAME,
+    ]
     assert chunks.select(pl.col("embedding").list.len()).to_series().to_list() == [
         EMBEDDING_DIM,
         EMBEDDING_DIM,
     ]
 
     with pytest.raises(ValueError, match="chunk_tokens"):
-        build_chunks(pages, FakeEmbedder(), batch_size=1, chunk_tokens=0, chunk_overlap=0)
+        build_chunks(
+            pages, FakeEmbedder(), batch_size=1, chunk_tokens=0, chunk_overlap=0
+        )
     with pytest.raises(ValueError, match="chunk_overlap"):
-        build_chunks(pages, FakeEmbedder(), batch_size=1, chunk_tokens=3, chunk_overlap=3)
+        build_chunks(
+            pages, FakeEmbedder(), batch_size=1, chunk_tokens=3, chunk_overlap=3
+        )
 
 
 def test_write_silver_round_trips_delta_vector_columns(tmp_path: Path) -> None:
@@ -274,7 +287,6 @@ def test_validate_vectors_rejects_wrong_embedding_dim() -> None:
 def test_build_silver_writes_pages_and_chunks_pipeline_runs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from amdc_lake import silver as silver_module
     from amdc_lake.bronze import write_bronze
 
     lake_dir = tmp_path / "lakehouse"
@@ -314,7 +326,9 @@ def test_build_silver_writes_pages_and_chunks_pipeline_runs(
     assert page_rows == 1
     assert chunk_rows >= 1
 
-    runs = pl.from_arrow(DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table())
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
     silver_runs = runs.filter(pl.col("stage").is_in(["silver_pages", "silver_chunks"]))
     assert silver_runs.height == 2
 
@@ -344,7 +358,9 @@ def test_record_run_appends_success_row(tmp_path: Path) -> None:
         handle.set_rows_out(7)
         handle.update_details(source_files=2, validate=True)
 
-    runs = pl.from_arrow(DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table())
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
     assert runs.height == 1
     row = runs.row(0, named=True)
     assert row["stage"] == "bronze"
@@ -367,7 +383,9 @@ def test_record_run_records_failure_and_reraises(tmp_path: Path) -> None:
             handle.set_rows_out(0)
             raise RuntimeError("boom")
 
-    runs = pl.from_arrow(DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table())
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
     assert runs.height == 1
     row = runs.row(0, named=True)
     assert row["stage"] == "silver_pages"

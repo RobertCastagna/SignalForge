@@ -1,4 +1,5 @@
 """Typer CLI entrypoint for the Adaptive Market Data Crawler."""
+
 from __future__ import annotations
 
 import asyncio

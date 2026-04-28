@@ -1,4 +1,5 @@
 """Bronze quality check orchestrator."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -54,7 +55,9 @@ def _empty_failure_cases() -> pl.DataFrame:
     )
 
 
-def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) -> pl.DataFrame:
+def _build_failures(
+    df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str
+) -> pl.DataFrame:
     """Join failure_cases (one row per failure) back onto df (one row per failed input row)."""
     row_failures = failure_cases.filter(pl.col("index").is_not_null())
     if row_failures.is_empty():
@@ -65,7 +68,9 @@ def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) 
 
     grouped = (
         row_failures.with_columns(
-            pl.concat_str([pl.col("column"), pl.lit(": "), pl.col("check")]).alias("_reason")
+            pl.concat_str([pl.col("column"), pl.lit(": "), pl.col("check")]).alias(
+                "_reason"
+            )
         )
         .group_by("index")
         .agg(pl.col("_reason").alias("_failure_reasons"))
@@ -74,9 +79,9 @@ def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) 
     df_idx = df.with_row_index(name="_row_index").with_columns(
         pl.col("_row_index").cast(pl.Int32)
     )
-    joined = df_idx.join(grouped, left_on="_row_index", right_on="index", how="inner").drop(
-        "_row_index"
-    )
+    joined = df_idx.join(
+        grouped, left_on="_row_index", right_on="index", how="inner"
+    ).drop("_row_index")
     return joined.with_columns(pl.lit(run_id).alias("_quality_run_id"))
 
 

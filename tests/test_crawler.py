@@ -27,8 +27,11 @@ class FakeResult:
 class FakeCrawler:
     """Drop-in for AsyncWebCrawler exposing only `arun`."""
 
-    def __init__(self, results_per_url: dict[str, list[FakeResult]] | None = None,
-                 raise_on: dict[str, Exception] | None = None) -> None:
+    def __init__(
+        self,
+        results_per_url: dict[str, list[FakeResult]] | None = None,
+        raise_on: dict[str, Exception] | None = None,
+    ) -> None:
         self._results = results_per_url or {}
         self._raise = raise_on or {}
 
@@ -163,7 +166,11 @@ def test_crawl_all_aggregates_per_site_records_and_stats(
 ) -> None:
     fake_sites = [
         {"url": "https://cnbc.com/", "url_patterns": ["*"], "include_external": False},
-        {"url": "https://finviz.com/", "url_patterns": ["*"], "include_external": False},
+        {
+            "url": "https://finviz.com/",
+            "url_patterns": ["*"],
+            "include_external": False,
+        },
     ]
     monkeypatch.setattr(crawler_module, "SITES", fake_sites)
 
@@ -183,9 +190,17 @@ def test_crawl_all_aggregates_per_site_records_and_stats(
         if site["url"].startswith("https://cnbc"):
             return (
                 [{"url": "https://cnbc.com/a", "_source_domain": "cnbc.com"}],
-                {"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None},
+                {
+                    "site": "cnbc.com",
+                    "pages_kept": 1,
+                    "pages_dropped": 0,
+                    "error": None,
+                },
             )
-        return ([], {"site": "finviz.com", "pages_kept": 0, "pages_dropped": 0, "error": None})
+        return (
+            [],
+            {"site": "finviz.com", "pages_kept": 0, "pages_dropped": 0, "error": None},
+        )
 
     monkeypatch.setattr(crawler_module, "_crawl_one", fake_crawl_one)
 

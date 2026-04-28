@@ -16,6 +16,7 @@ Query-driven components (unchanged):
   * KeywordRelevanceScorer  — orders link discovery toward query-relevant URLs.
   * BM25ContentFilter       — content pruning inside each fetched page.
 """
+
 from __future__ import annotations
 
 import asyncio

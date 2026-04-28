@@ -1,4 +1,5 @@
 """Custom data quality check primitives for the Bronze layer."""
+
 from __future__ import annotations
 
 import re
@@ -115,7 +116,9 @@ def compute_run_drift(
             )
             for ts in recent_ts
         ]
-        always_present = set.intersection(*domains_per_run) if domains_per_run else set()
+        always_present = (
+            set.intersection(*domains_per_run) if domains_per_run else set()
+        )
         current_domains = set(current.get_column("source_domain").to_list())
         for missing in sorted(always_present - current_domains):
             findings.append(
