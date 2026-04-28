@@ -6,9 +6,11 @@ sites — CNBC, Investing.com, and Finviz — for a given search query, then wri
 results to parquet for downstream `polars` analysis. A companion Delta Lake
 pipeline (`amdc-lake`) promotes those parquet outputs through Bronze (with
 Pandera data-quality validation) and Silver (page- and chunk-level tables with
-384-dim BAAI/bge-small-en-v1.5 embeddings). Every stage records a durable run
-row to `_pipeline/runs` so timing, row counts, and per-site / per-batch detail
-are inspectable after the fact.
+384-dim BAAI/bge-small-en-v1.5 embeddings). A self-updating RAG entrypoint
+(`run_amdc.py`) embeds a query, scores it against Silver chunk embeddings, and
+auto-triggers a fresh crawl + Bronze + Silver build when the cache is thin.
+Every stage records a durable run row to `_pipeline/runs` so timing, row
+counts, and per-site / per-batch detail are inspectable after the fact.
 
 ## Stack
 
@@ -103,6 +105,11 @@ Silver writes two Delta tables:
 - `silver/chunks`: retrieval-sized text chunks with their own 384-float
   BAAI/bge-small-en-v1.5 embeddings.
 
+`silver-build` is **incremental by default**: it anti-joins the candidate
+Bronze rows against the existing `silver/pages` on `bronze_id` and only embeds
+what is new, then appends to both tables. Pass `--rebuild` to force a full
+overwrite when schemas change or the embedding model is swapped.
+
 Gold is intentionally empty until downstream analytics requirements are added.
 
 With Docker, run the lake CLI by overriding the entrypoint:
@@ -112,6 +119,36 @@ docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler bronze-backfill --input-dir /app/data --lake-dir /app/data/lakehouse
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler silver-build --lake-dir /app/data/lakehouse
 ```
+
+## Self-updating RAG query
+
+`run_amdc.py` is a query-time entrypoint that closes the loop between the
+lakehouse and ad-hoc retrieval. It embeds the query with the same
+`BAAI/bge-small-en-v1.5` weights, cosine-scores it against `silver/chunks`,
+keeps the top chunk per article, and joins back to `silver/pages` for context.
+When fewer than `--min-articles` chunks clear `--threshold`, it kicks off a
+crawl + Bronze append + incremental Silver build, then re-queries:
+
+```bash
+uv run python run_amdc.py "semiconductor supply chain"
+uv run python run_amdc.py "fed rate decision" --threshold 0.55 --min-articles 5
+uv run python run_amdc.py "semiconductor supply chain" --no-crawl
+uv run python run_amdc.py "semiconductor supply chain" --force-crawl
+```
+
+Flags:
+
+- `--threshold` (default `0.5`) — cosine similarity cutoff (strictly greater than).
+- `--min-articles` (default `10`) — trigger a crawl when fewer hits clear the threshold.
+- `--top-k` (default `20`) — max rows displayed.
+- `--data-dir` / `--lake-dir` — paths to the raw parquet directory and the lakehouse.
+- `--force-crawl` — always crawl, even if the cache would hit.
+- `--no-crawl` — never crawl, even if below `min-articles`.
+- `--log-level` (default `INFO`).
+
+Read-only on the cache hit path; the crawl path writes Bronze and Silver via
+the same code paths as `amdc-lake`, so quality checks and `_pipeline/runs`
+rows still apply.
 
 ## Observing pipeline runs
 
@@ -165,7 +202,9 @@ Bronze writes route through a Pandera `DataFrameSchema`
 
 - `bronze_id` SHA256 shape and uniqueness
 - `source_url` HTTP(S) prefix
-- `source_domain` ∈ allowed set (derived from `SITES`)
+- `source_domain` is required (non-null). The earlier whitelist (derived from
+  `SITES`) was removed in `688bf64` because the crawler emits `www.cnbc.com`
+  while the whitelist held bare `cnbc.com`, which quarantined real rows.
 - text length bounds, BM25 score floor, and a custom URL-junk-ratio check
 
 Failures are appended to `bronze/scrapes_quarantine` (with `_failure_reasons`
@@ -208,9 +247,9 @@ The full suite runs locally without Docker:
 uv run pytest tests
 ```
 
-55 unit tests cover the crawler, extract, store, lakehouse pipeline (Bronze
+67 unit tests cover the crawler, extract, store, lakehouse pipeline (Bronze
 and Silver), CLI surfaces, data-quality framework, and the observability
-module. Coverage is ~92% across the `src/` tree; run it yourself with:
+module. Coverage is above 90% across the `src/` tree; run it yourself with:
 
 ```bash
 uv run --with coverage --with pytest python -m coverage run --source=src \
