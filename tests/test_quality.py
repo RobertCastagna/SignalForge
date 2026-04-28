@@ -198,9 +198,10 @@ def test_run_bronze_checks_rejects_error_page_text(tmp_path: Path) -> None:
     assert result.rows_failed == 1
     assert result.status == "fail"
     assert any(
-        c["column"] == "text" and "sentinel" in c["check"]
-        for c in result.check_summary
+        c["column"] == "text" and "sentinel" in c["check"] for c in result.check_summary
     )
+
+
 def test_compute_null_counts_reports_per_column() -> None:
     df = _bronze_frame(
         [
