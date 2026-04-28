@@ -9,7 +9,7 @@ from typing import Literal
 
 import polars as pl
 
-from amdc_lake.ids import sha256_id
+from amdc_lake.ids import normalize_url, sha256_id
 from amdc_lake.observability import record_run
 from amdc_lake.paths import bronze_scrapes_path, ensure_layers
 
@@ -60,14 +60,12 @@ def _normalize_frame(
         pl.col("crawled_at").cast(pl.Utf8, strict=False),
     )
     df = df.with_columns(
-        pl.struct(["source_url", "query", "crawled_at", "title", "text"])
+        pl.struct(["source_url", "crawled_at", "title"])
         .map_elements(
             lambda row: sha256_id(
-                row["source_url"],
-                row["query"],
-                row["crawled_at"],
+                (row["crawled_at"] or "")[:10],
+                normalize_url(row["source_url"]),
                 row["title"],
-                row["text"],
                 prefix="bronze",
             ),
             return_dtype=pl.Utf8,
@@ -118,6 +116,20 @@ def _build_title_embed_fn():
     return lambda texts: embedder.embed(texts, batch_size=32)
 
 
+def _existing_bronze_ids(lake_dir: Path) -> set[str]:
+    target = bronze_scrapes_path(lake_dir)
+    if not target.exists():
+        return set()
+    from deltalake import DeltaTable
+
+    try:
+        table = DeltaTable(str(target))
+    except Exception:
+        return set()
+    arrow = table.to_pyarrow_table(columns=["bronze_id"])
+    return set(arrow.column("bronze_id").to_pylist())
+
+
 def backfill_parquet(
     input_dir: Path,
     lake_dir: Path,
@@ -134,6 +146,7 @@ def backfill_parquet(
 
     with record_run("bronze", lake_dir, rows_in=rows_loaded, logger=log) as handle:
         rows_quarantined = 0
+        rows_skipped_duplicate = 0
         quality_run_id: str | None = None
         if validate and not df.is_empty():
             from amdc_lake.quality.metrics import append_run
@@ -150,6 +163,17 @@ def backfill_parquet(
                 df = df.filter(
                     ~pl.col("bronze_id").is_in(result.failures.get_column("bronze_id"))
                 )
+        if mode == "append" and not df.is_empty():
+            existing = _existing_bronze_ids(lake_dir)
+            if existing:
+                before = df.height
+                df = df.filter(~pl.col("bronze_id").is_in(list(existing)))
+                rows_skipped_duplicate = before - df.height
+                if rows_skipped_duplicate:
+                    log.info(
+                        "bronze: skipped %d row(s) already present in Delta table",
+                        rows_skipped_duplicate,
+                    )
         target = write_bronze(df, lake_dir, mode=mode)
         rows_written = df.height
         if rows_quarantined > 0:
@@ -158,6 +182,7 @@ def backfill_parquet(
         handle.update_details(
             source_files=source_files,
             rows_quarantined=rows_quarantined,
+            rows_skipped_duplicate=rows_skipped_duplicate,
             validate=validate,
             mode=mode,
             quality_run_id=quality_run_id,
