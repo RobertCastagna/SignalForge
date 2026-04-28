@@ -1,6 +1,5 @@
 """Shared lakehouse constants."""
 
-MODEL_NAME = "BAAI/bge-m3"
-EMBEDDING_DIM = 1024
-MAX_LENGTH = 8192
-
+MODEL_NAME = "BAAI/bge-small-en-v1.5"
+EMBEDDING_DIM = 384
+MAX_LENGTH = 512
