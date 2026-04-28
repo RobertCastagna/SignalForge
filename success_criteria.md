@@ -111,22 +111,3 @@ order. None of them require rethinking the architecture.
 8. **Crawler unit tests** — cover `extract.py` parsing edge cases (date
    regex fallbacks, missing titles, truncation). Pure functions, easy to
    test deterministically.
-
-## Why stopping here is the right call
-
-- **The data path is correct end-to-end.** Crawl → Bronze (deduped,
-  idempotent) → Silver (incremental) → cosine search in Streamlit. The
-  inter-layer contracts are stable and tested.
-- **The auditability primitives already exist.** `_pipeline/runs` and
-  `_quality/runs` are durable Delta tables. When monitoring becomes
-  worth wiring up, the substrate is there — no refactor needed.
-- **The hot spots are concentrated.** Almost every crawler tunable is
-  in `src/amdc/config.py`; lakehouse paths are in `src/amdc_lake/paths.py`.
-  Future tuning is a config change, not a redesign.
-- **The biggest gaps are additive, not rewrites.** Scheduling, alerting,
-  and the Gold layer can each be added without touching what already
-  works.
-
-The project is at a defensible v1: it does the thing it was built to
-do, the failure modes are known and named, and the next investments are
-clearly scoped. Stopping here means stopping with optionality intact.
