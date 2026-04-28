@@ -17,6 +17,7 @@ from run_amdc import BgeM3Embedder, orchestrate_query
 DEFAULT_THRESHOLD = 0.5
 DEFAULT_MIN_ARTICLES = 10
 DEFAULT_TOP_K = 20
+THRESHOLD_OPTIONS = [round(i / 10, 1) for i in range(11)]
 _RAW_DQ_COLUMNS = [
     "Raw Check Summary",
     "Raw Drift Report",
@@ -58,7 +59,7 @@ def _get_embedder() -> BgeM3Embedder:
 
 def _render_results(result) -> None:
     st.caption(
-        f"Matches: {result.final_matches} | Threshold: {result.threshold:.2f} | "
+        f"Matches: {result.final_matches} | Threshold: {result.threshold:.1f} | "
         f"Minimum articles: {result.min_articles}"
     )
     st.dataframe(
@@ -139,9 +140,12 @@ def _summarize_nulls(null_counts: Any) -> str:
         for column, count in sorted(null_counts.items())
         if isinstance(count, (int, float)) and count > 0
     ]
-    return "; ".join(nonzero[:5]) + (
-        f"; +{len(nonzero) - 5} more" if len(nonzero) > 5 else ""
-    ) if nonzero else "None"
+    return (
+        "; ".join(nonzero[:5])
+        + (f"; +{len(nonzero) - 5} more" if len(nonzero) > 5 else "")
+        if nonzero
+        else "None"
+    )
 
 
 def _summarize_duplicates(clusters: Any) -> str:
@@ -231,7 +235,9 @@ def _read_quality_runs(lake_dir: Path = DEFAULT_LAKE_DIR) -> pl.DataFrame:
     try:
         return pl.read_delta(str(target))
     except Exception:
-        logging.getLogger(__name__).exception("failed to read quality runs from %s", target)
+        logging.getLogger(__name__).exception(
+            "failed to read quality runs from %s", target
+        )
         return pl.DataFrame()
 
 
@@ -272,12 +278,12 @@ def _render_search_tab() -> None:
     with st.form("amdc_search"):
         query = st.text_input("Search", max_chars=200)
         no_crawl = st.checkbox("No crawl", value=False)
-        threshold = st.slider(
-            "Threshold",
-            min_value=0.0,
-            max_value=1.0,
+        threshold = st.select_slider(
+            "Cosine similarity threshold",
+            options=THRESHOLD_OPTIONS,
             value=DEFAULT_THRESHOLD,
-            step=0.01,
+            format_func=lambda value: f"{value:.1f}",
+            help="Only articles with similarity strictly greater than this value are returned.",
         )
         submitted = st.form_submit_button("Search")
 
