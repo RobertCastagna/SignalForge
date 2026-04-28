@@ -7,13 +7,25 @@ from typing import Callable, Sequence
 
 import polars as pl
 
-URL_RE = re.compile(r"https?://\S+|www\.\S+")
+URL_RE = re.compile(r"\[[^\]]*\]\([^)]+\)|https?://\S+|www\.\S+")
+
+_ERROR_PAGE_RE = re.compile(
+    r"(?i)("
+    r"oops[,!]?\s*something\s+went\s+wrong"
+    r"|temporarily\s+down\s+for\s+maintenance"
+    r"|access\s+denied"
+    r"|page\s+not\s+found"
+    r"|\b404\s+not\s+found\b"
+    r"|sign\s+in\s+to\s+(?:read|continue)"
+    r"|subscribe\s+to\s+(?:read|continue)"
+    r")"
+)
 
 EmbedFn = Callable[[Sequence[str]], list[list[float]]]
 
 
 def url_junk_ratio(text: str | None) -> float:
-    """Fraction of `text` characters covered by URL-structured substrings."""
+    """Fraction of `text` characters covered by URL or markdown-link substrings."""
     if not text:
         return 0.0
     matched = sum(len(m) for m in URL_RE.findall(text))
@@ -22,6 +34,10 @@ def url_junk_ratio(text: str | None) -> float:
 
 def text_passes_junk(text: str | None) -> bool:
     return url_junk_ratio(text) <= 0.5
+
+
+def text_is_not_error_page(text: str | None) -> bool:
+    return text is None or _ERROR_PAGE_RE.search(text) is None
 
 
 def compute_run_drift(

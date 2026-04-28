@@ -63,7 +63,7 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
         {
             "title": "Fed decision",
             "date_published": "2026-04-28",
-            "text": "Markets watch the Federal Reserve decision.",
+            "text": "Markets watch the Federal Reserve decision today and tomorrow.",
             "source_url": "https://cnbc.com/fed",
             "source_domain": "cnbc.com",
             "relevance_score": 1.0,
@@ -73,7 +73,7 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
         {
             "title": "Fed decision",
             "date_published": "2026-04-28",
-            "text": "Markets watch the Federal Reserve decision.",
+            "text": "Markets watch the Federal Reserve decision today and tomorrow.",
             "source_url": "https://cnbc.com/fed",
             "source_domain": "cnbc.com",
             "relevance_score": 1.0,
@@ -124,6 +124,11 @@ def test_load_parquet_dir_returns_empty_bronze_schema(tmp_path: Path) -> None:
 def test_clean_text_collapses_whitespace() -> None:
     assert clean_text("  alpha\n\n beta\tgamma  ") == "alpha beta gamma"
     assert clean_text(None) == ""
+
+
+def test_clean_text_unescapes_html_entities() -> None:
+    assert clean_text("don&#8217;t Q&amp;A&nbsp;here") == "don’t Q&A here"
+    assert clean_text("Apple &mdash; new chip") == "Apple — new chip"
 
 
 def test_build_pages_skips_blank_text_and_adds_384_dim_embeddings() -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 from datetime import datetime, timezone
@@ -83,7 +84,7 @@ _WS_RE = re.compile(r"\s+")
 
 
 def clean_text(text: str | None) -> str:
-    return _WS_RE.sub(" ", text or "").strip()
+    return _WS_RE.sub(" ", html.unescape(text or "")).strip()
 
 
 def read_bronze(lake_dir: Path) -> pl.DataFrame:

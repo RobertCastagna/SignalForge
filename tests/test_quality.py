@@ -10,6 +10,7 @@ from amdc_lake.paths import bronze_scrapes_quarantine_path
 from amdc_lake.quality.checks import (
     compute_null_counts,
     compute_run_drift,
+    text_is_not_error_page,
     find_title_duplicate_clusters,
     text_passes_junk,
     url_junk_ratio,
@@ -46,6 +47,25 @@ def test_url_junk_ratio_handles_empty_and_pure_url() -> None:
     assert url_junk_ratio("https://example.com") > 0.9
     assert text_passes_junk("real article body with some words") is True
     assert text_passes_junk("https://a.com https://b.com https://c.com") is False
+
+
+def test_url_junk_ratio_counts_markdown_link_residue() -> None:
+    nav = "[Skip Navigation](https://cnbc.com/x) [Halftime Report](https://cnbc.com/y)"
+    assert url_junk_ratio(nav) > 0.9
+    assert text_passes_junk(nav) is False
+
+
+def test_text_is_not_error_page_flags_known_sentinels() -> None:
+    assert text_is_not_error_page(None) is True
+    assert text_is_not_error_page("real article body with some words") is True
+    assert text_is_not_error_page("Oops, something went wrong") is False
+    assert (
+        text_is_not_error_page("We are temporarily down for maintenance, please retry")
+        is False
+    )
+    assert text_is_not_error_page("Sign in to read more of this article") is False
+    assert text_is_not_error_page("Subscribe to continue reading") is False
+    assert text_is_not_error_page("404 Not Found - the resource is missing") is False
 
 
 def test_compute_run_drift_returns_baseline_when_no_history() -> None:
@@ -158,6 +178,29 @@ def test_write_quarantine_returns_none_for_empty_failures(tmp_path: Path) -> Non
     assert write_quarantine(empty, tmp_path) is None
 
 
+def test_run_bronze_checks_rejects_text_below_min_length(tmp_path: Path) -> None:
+    df = _bronze_frame([_good_row(text="Short.")])
+
+    result = run_bronze_checks(df, tmp_path)
+
+    assert result.rows_failed == 1
+    assert result.status == "fail"
+    assert any(c["column"] == "text" for c in result.check_summary)
+
+
+def test_run_bronze_checks_rejects_error_page_text(tmp_path: Path) -> None:
+    df = _bronze_frame(
+        [_good_row(text="Oops, something went wrong " + "padding " * 10)]
+    )
+
+    result = run_bronze_checks(df, tmp_path)
+
+    assert result.rows_failed == 1
+    assert result.status == "fail"
+    assert any(
+        c["column"] == "text" and "sentinel" in c["check"]
+        for c in result.check_summary
+    )
 def test_compute_null_counts_reports_per_column() -> None:
     df = _bronze_frame(
         [
