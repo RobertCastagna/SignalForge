@@ -75,6 +75,11 @@ def silver_build(
     device: str | None = typer.Option(
         None, "--device", help="Torch device override, such as cpu or cuda."
     ),
+    rebuild: bool = typer.Option(
+        False,
+        "--rebuild",
+        help="Force a full overwrite rebuild instead of incremental append.",
+    ),
     log_level: str = typer.Option("INFO", "--log-level"),
 ) -> None:
     _configure_logging(log_level)
@@ -86,6 +91,7 @@ def silver_build(
         chunk_tokens=chunk_tokens,
         chunk_overlap=chunk_overlap,
         device=device,
+        rebuild=rebuild,
     )
     typer.echo(f"Wrote {page_rows} silver page rows -> {pages_target}")
     typer.echo(f"Wrote {chunk_rows} silver chunk rows -> {chunks_target}")
