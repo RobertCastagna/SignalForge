@@ -65,7 +65,7 @@ def _render_results(result) -> None:
     st.dataframe(
         result.hits,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "similarity": st.column_config.NumberColumn(
                 "Similarity",
@@ -271,7 +271,7 @@ def _render_header() -> None:
         "thin, the orchestrator can crawl fresh sources, run Bronze data "
         "quality, rebuild Silver embeddings, and return updated results."
     )
-    st.graphviz_chart(_process_flow_dot(), use_container_width=True)
+    st.graphviz_chart(_process_flow_dot(), width="stretch")
 
 
 def _render_search_tab() -> None:
@@ -336,7 +336,7 @@ def _render_quality_tab() -> None:
     st.dataframe(
         display,
         hide_index=True,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Rows In": st.column_config.NumberColumn("Rows In", format="%d"),
             "Rows Passed": st.column_config.NumberColumn("Rows Passed", format="%d"),
