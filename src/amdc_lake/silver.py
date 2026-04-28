@@ -163,6 +163,23 @@ def build_chunks(
             "chunk_overlap must be non-negative and smaller than chunk_tokens"
         )
 
+    # Embedder adds special tokens (e.g. [CLS] [SEP]) at embed time; clamp the
+    # raw chunk so the encoded sequence fits inside model_max_length without
+    # silent truncation losing the tail of every chunk.
+    special_overhead = embedder.tokenizer.num_special_tokens_to_add(pair=False)
+    effective_max = max(1, embedder.max_length - special_overhead)
+    if chunk_tokens > effective_max:
+        log.info(
+            "silver: clamping chunk_tokens %d -> %d (model_max=%d, special=%d)",
+            chunk_tokens,
+            effective_max,
+            embedder.max_length,
+            special_overhead,
+        )
+        chunk_tokens = effective_max
+        if chunk_overlap >= chunk_tokens:
+            chunk_overlap = max(0, chunk_tokens // 8)
+
     embedded_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict] = []
     for row in pages.iter_rows(named=True):
