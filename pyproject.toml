@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "crawl4ai>=0.4",
     "deltalake>=0.25",
+    "pandera[polars]>=0.22",
     "polars>=1.0",
     "pyarrow>=17",
     "safetensors>=0.4",
@@ -17,6 +18,11 @@ dependencies = [
 [project.scripts]
 amdc = "amdc.main:app"
 amdc-lake = "amdc_lake.cli:app"
+
+[dependency-groups]
+test = [
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]

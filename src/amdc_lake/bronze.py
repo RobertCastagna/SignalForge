@@ -85,7 +85,25 @@ def write_bronze(df: pl.DataFrame, lake_dir: Path, *, mode: WriteMode = "overwri
     return target
 
 
-def backfill_parquet(input_dir: Path, lake_dir: Path, *, mode: WriteMode = "overwrite") -> tuple[Path, int]:
+def backfill_parquet(
+    input_dir: Path,
+    lake_dir: Path,
+    *,
+    mode: WriteMode = "overwrite",
+    validate: bool = True,
+) -> tuple[Path, int]:
     df = load_parquet_dir(input_dir)
+    if validate and not df.is_empty():
+        from amdc_lake.quality.metrics import append_run
+        from amdc_lake.quality.quarantine import write_quarantine
+        from amdc_lake.quality.runner import run_bronze_checks
+
+        result = run_bronze_checks(df, lake_dir)
+        write_quarantine(result.failures, lake_dir)
+        append_run(result, lake_dir)
+        if not result.failures.is_empty():
+            df = df.filter(
+                ~pl.col("bronze_id").is_in(result.failures.get_column("bronze_id"))
+            )
     target = write_bronze(df, lake_dir, mode=mode)
     return target, df.height

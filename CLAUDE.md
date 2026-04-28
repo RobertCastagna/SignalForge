@@ -4,7 +4,7 @@ Guidance for Claude (and humans) working in this repository.
 
 ## Project overview
 
-**Adaptive Market Data Crawler (AMDC)** — scrapes financial news from CNBC, Investing.com, and Finviz, writes raw parquet, then promotes it through a Bronze → Silver → Gold Delta Lake with BAAI/bge-m3 embeddings (1024-dim). Gold is intentionally empty; downstream analytics live there later.
+**Adaptive Market Data Crawler (AMDC)** — scrapes financial news from CNBC, Investing.com, and Finviz, writes raw parquet, then promotes it through a Bronze → Silver → Gold Delta Lake with BAAI/bge-small-en-v1.5 embeddings (384-dim). Gold is intentionally empty; downstream analytics live there later.
 
 Two installable packages:
 - `amdc` — the crawler (`src/amdc/`).
@@ -16,7 +16,7 @@ Two installable packages:
 - `uv` for env + lockfile (`uv.lock` is committed).
 - `crawl4ai` (Playwright/Chromium) for scraping.
 - `polars` + `pyarrow` for columnar IO; `deltalake>=0.25` for table format.
-- `transformers` + `torch` for embeddings (BAAI/bge-m3).
+- `transformers` + `torch` for embeddings (BAAI/bge-small-en-v1.5).
 - `typer` for both CLIs.
 
 ## Layout
@@ -34,13 +34,13 @@ src/amdc_lake/    lakehouse pipeline
   paths.py        Lakehouse layer + table path conventions
   bronze.py       Raw parquet → Bronze Delta (dedup + composite ID)
   silver.py       Bronze → page-level + chunk-level Silver (with embeddings)
-  embedder.py     BgeM3Embedder wrapper around HF AutoModel/AutoTokenizer
+  embedder.py     BGE-small wrapper around HF AutoModel/AutoTokenizer
   ids.py          sha256_id(*parts, prefix) helper
 
 scripts/          probe_sites.py, validate_sites.py — site reachability probes
 data/             gitignored output (parquet + lakehouse/)
 show_latest.py    quick preview of the most recent crawl parquet
-Dockerfile        multi-stage uv + Playwright + bge-m3 weights pre-baked
+Dockerfile        multi-stage uv + Playwright + BGE-small weights pre-baked
 ```
 
 ## Common commands
@@ -67,6 +67,8 @@ docker build -t market-crawler .
 docker run --rm -v "$(pwd)/data:/app/data" market-crawler "<query>"
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler \
   silver-build --lake-dir /app/data/lakehouse
+
+docker run --rm --entrypoint pytest market-crawler tests
 ```
 
 ## Data conventions
@@ -76,7 +78,7 @@ docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler
   - `bronze_id` = hash(source_url, query, crawled_at, title, text)
   - `page_id`   = hash(bronze_id, source_url, query, text_hash)
   - `chunk_id`  = hash(page_id, chunk_index, chunk_text)
-- Embedding columns: `List[Float32]`, dim **1024**, model `BAAI/bge-m3`.
+- Embedding columns: `List[Float32]`, dim **384**, model `BAAI/bge-small-en-v1.5`.
 - Chunking is **token-based** (sliding window over tokenizer output), not char-based; defaults 512 tokens / 64 overlap.
 
 ## Configuration hot spots
@@ -99,8 +101,8 @@ Lakehouse paths and layer names: `src/amdc_lake/paths.py`.
 
 ## Embedding constraints
 
-- bge-m3 weights are heavy; the Dockerfile pre-downloads them at build time. Don't re-download at runtime in images.
-- `BgeM3Embedder` auto-selects CUDA if present, else CPU.
+- BGE-small weights are pre-downloaded at Docker build time. Don't re-download at runtime in images.
+- `BgeM3Embedder` is the historical class name; it currently loads `BAAI/bge-small-en-v1.5` and auto-selects CUDA if present, else CPU.
 - **Intel Mac (x86_64 darwin) caveat**: `pyproject.toml` excludes `torch` from the Linux CPU index on darwin x86_64; the local install uses whatever wheel pip can resolve. PyTorch wheels for Intel Mac top out at **2.2.2**, which forces `transformers<5` and rules out the Qwen3.5+ family. Don't bump these past the documented ceiling without testing on the actual hardware.
 
 ## Git workflow
@@ -149,7 +151,7 @@ Scopes for this repo: `amdc`, `amdc-lake`, `crawler`, `silver`, `bronze`, `embed
 Examples:
 - `feat(silver): add incremental chunk embedding by bronze_id`
 - `fix(crawler): handle Finviz redirect to login page`
-- `build(docker): pre-download bge-m3 weights at image build time`
+- `build(docker): pre-download bge-small weights at image build time`
 - `docs: document lakehouse layer schemas in CLAUDE.md`
 
 ## Things to avoid

@@ -45,6 +45,7 @@ from amdc.config import (
     DEEP_CRAWL_MAX_DEPTH,
     DEEP_CRAWL_MAX_PAGES,
     MIN_FIT_MARKDOWN_CHARS,
+    MIN_RAW_MARKDOWN_CHARS,
     PAGE_TIMEOUT_MS,
     PARALLEL_SITES,
     SIMULATE_USER,
@@ -132,9 +133,10 @@ async def _crawl_one(crawler: AsyncWebCrawler, site: dict, query: str) -> list[d
             if result.url.rstrip("/") == start_url.rstrip("/"):
                 continue
             fit, raw = _md_fields(getattr(result, "markdown", None))
-            # Only keep pages where the BM25-filtered body is substantive.
-            # Empty/short fit means the page is likely nav-only or boilerplate.
-            if len(fit) < MIN_FIT_MARKDOWN_CHARS:
+            # Keep a page if either the raw body is substantial OR the
+            # BM25-filtered body has enough query-relevant content. Gating on
+            # fit alone drops long articles where BM25 over-trims.
+            if len(raw) < MIN_RAW_MARKDOWN_CHARS and len(fit) < MIN_FIT_MARKDOWN_CHARS:
                 continue
             metadata = getattr(result, "metadata", None) or {}
             score = metadata.get("score") if isinstance(metadata, dict) else None

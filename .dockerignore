@@ -2,6 +2,7 @@ data/
 .git
 .gitignore
 .venv
+.uv-cache
 __pycache__
 **/__pycache__
 *.pyc

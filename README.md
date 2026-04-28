@@ -4,7 +4,7 @@ Dockerized Python CLI that runs `crawl4ai`'s `AdaptiveCrawler` against three
 predefined market-data sites for a given search query and writes the results
 to a parquet file for downstream `polars` analysis. It also includes a Delta
 Lake pipeline that ports those local parquet outputs into Bronze and Silver
-layers with BAAI/bge-m3 embeddings.
+layers with BAAI/bge-small-en-v1.5 embeddings.
 
 ## Stack
 
@@ -13,7 +13,7 @@ layers with BAAI/bge-m3 embeddings.
 - `crawl4ai` (Playwright/Chromium under the hood) for adaptive crawling
 - `polars` + `pyarrow` for the parquet write/read path
 - `delta-rs` for Delta Lake writes
-- Hugging Face `transformers` + PyTorch for BAAI/bge-m3 embeddings
+- Hugging Face `transformers` + PyTorch for BAAI/bge-small-en-v1.5 embeddings
 - `typer` for the CLI
 
 ## Build
@@ -23,7 +23,7 @@ docker build -t market-crawler .
 ```
 
 The first build is slow because Chromium is downloaded by `playwright install`.
-The image also pre-downloads `BAAI/bge-m3`, so the first Silver build does not
+The image also pre-downloads `BAAI/bge-small-en-v1.5`, so the first Silver build does not
 need to fetch model weights at runtime.
 
 ## Run
@@ -93,10 +93,10 @@ uv run amdc-lake silver-build \
 
 Silver writes two Delta tables:
 
-- `silver/pages`: one cleaned page-level row per scrape with a 1024-float
-  BAAI/bge-m3 embedding.
-- `silver/chunks`: retrieval-sized text chunks with their own 1024-float
-  BAAI/bge-m3 embeddings.
+- `silver/pages`: one cleaned page-level row per scrape with a 384-float
+  BAAI/bge-small-en-v1.5 embedding.
+- `silver/chunks`: retrieval-sized text chunks with their own 384-float
+  BAAI/bge-small-en-v1.5 embeddings.
 
 Gold is intentionally empty until downstream analytics requirements are added.
 
@@ -125,6 +125,22 @@ uv sync
 uv run playwright install chromium
 uv run amdc "semiconductor supply chain" --data-dir ./data
 uv run amdc-lake bronze-backfill --input-dir ./data --lake-dir ./data/lakehouse
+```
+
+## Tests
+
+The pipeline tests are designed to run inside the Docker image and include one
+real `BAAI/bge-small-en-v1.5` embedding smoke test:
+
+```bash
+docker build -t market-crawler .
+docker run --rm --entrypoint pytest market-crawler tests
+```
+
+For an already-running test container:
+
+```bash
+docker exec signalforge-test pytest tests
 ```
 
 ## Error handling

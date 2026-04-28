@@ -1,4 +1,4 @@
-"""BAAI/bge-m3 embedding through Hugging Face Transformers."""
+"""BGE small embedding through Hugging Face Transformers."""
 from __future__ import annotations
 
 from dataclasses import dataclass
