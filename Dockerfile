@@ -18,10 +18,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock* ./
 COPY src ./src
 
-RUN uv sync --frozen
+RUN uv sync --frozen --group test
 
 RUN python -m playwright install --with-deps chromium
 RUN python -c "from transformers import AutoModel, AutoTokenizer; name='BAAI/bge-small-en-v1.5'; AutoTokenizer.from_pretrained(name); AutoModel.from_pretrained(name)"
+
+COPY tests ./tests
 
 RUN mkdir -p /app/data/lakehouse/bronze /app/data/lakehouse/silver /app/data/lakehouse/gold
 VOLUME ["/app/data"]

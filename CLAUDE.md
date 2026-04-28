@@ -67,6 +67,8 @@ docker build -t market-crawler .
 docker run --rm -v "$(pwd)/data:/app/data" market-crawler "<query>"
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler \
   silver-build --lake-dir /app/data/lakehouse
+
+docker run --rm --entrypoint pytest market-crawler tests
 ```
 
 ## Data conventions

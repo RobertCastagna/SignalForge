@@ -127,6 +127,22 @@ uv run amdc "semiconductor supply chain" --data-dir ./data
 uv run amdc-lake bronze-backfill --input-dir ./data --lake-dir ./data/lakehouse
 ```
 
+## Tests
+
+The pipeline tests are designed to run inside the Docker image and include one
+real `BAAI/bge-small-en-v1.5` embedding smoke test:
+
+```bash
+docker build -t market-crawler .
+docker run --rm --entrypoint pytest market-crawler tests
+```
+
+For an already-running test container:
+
+```bash
+docker exec signalforge-test pytest tests
+```
+
 ## Error handling
 
 If one of the three sites blocks the crawler or fails, the error is logged
