@@ -9,7 +9,7 @@ from deltalake import DeltaTable
 
 from amdc_lake.bronze import backfill_parquet, load_parquet_dir
 from amdc_lake.constants import EMBEDDING_DIM, MODEL_NAME
-from amdc_lake.ids import sha256_id
+from amdc_lake.ids import normalize_url, sha256_id
 from amdc_lake.observability import record_run
 from amdc_lake.paths import (
     bronze_scrapes_path,
@@ -53,6 +53,21 @@ def test_sha256_id_is_stable_and_prefixed() -> None:
 
     assert first == second
     assert first.startswith("bronze_")
+
+
+def test_normalize_url_strips_query_fragment_and_lowercases_host() -> None:
+    assert (
+        normalize_url("https://CNBC.com/fed?utm=x#frag")
+        == "https://cnbc.com/fed"
+    )
+    assert (
+        normalize_url("HTTPS://Investing.COM/news/Markets/")
+        == "https://investing.com/news/Markets"
+    )
+    assert normalize_url("https://example.com") == "https://example.com"
+    assert normalize_url(None) is None
+    assert normalize_url("") is None
+    assert normalize_url("not a url") is None
 
 
 def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
@@ -111,6 +126,76 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
     assert details["rows_quarantined"] == 0
     assert details["validate"] is True
     assert details["quality_run_id"] is not None
+
+
+def test_backfill_parquet_collapses_url_variants_and_text_drift(tmp_path: Path) -> None:
+    """Same article, same UTC day: tracking-param URL variants and re-scraped
+    text changes must collapse to one bronze row."""
+    input_dir = tmp_path / "input"
+    lake_dir = tmp_path / "lakehouse"
+    input_dir.mkdir()
+    rows = [
+        {
+            "title": "Fed decision",
+            "date_published": "2026-04-28",
+            "text": "Markets watch the Federal Reserve decision today and tomorrow as policy looms.",
+            "source_url": "https://CNBC.com/fed?utm_source=twitter",
+            "source_domain": "cnbc.com",
+            "relevance_score": 1.0,
+            "query": "Fed rate decision",
+            "crawled_at": "2026-04-28T01:00:00+00:00",
+        },
+        {
+            "title": "Fed decision",
+            "date_published": "2026-04-28",
+            "text": "Updated body: markets continue watching the Federal Reserve decision into tomorrow.",
+            "source_url": "https://cnbc.com/fed#section-2",
+            "source_domain": "cnbc.com",
+            "relevance_score": 1.0,
+            "query": "Fed rate decision",
+            "crawled_at": "2026-04-28T15:30:00+00:00",
+        },
+    ]
+    pl.DataFrame(rows).write_parquet(input_dir / "market_data_20260428T000000Z.parquet")
+
+    _, row_count = backfill_parquet(input_dir, lake_dir)
+
+    assert row_count == 1
+
+
+def test_backfill_parquet_is_idempotent_on_append(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    lake_dir = tmp_path / "lakehouse"
+    input_dir.mkdir()
+    rows = [
+        {
+            "title": "Fed decision",
+            "date_published": "2026-04-28",
+            "text": "Markets watch the Federal Reserve decision today and tomorrow.",
+            "source_url": "https://cnbc.com/fed",
+            "source_domain": "cnbc.com",
+            "relevance_score": 1.0,
+            "query": "Fed rate decision",
+            "crawled_at": "2026-04-28T00:00:00+00:00",
+        }
+    ]
+    pl.DataFrame(rows).write_parquet(input_dir / "market_data_20260428T000000Z.parquet")
+
+    target, first_rows = backfill_parquet(input_dir, lake_dir, mode="append")
+    _, second_rows = backfill_parquet(input_dir, lake_dir, mode="append")
+
+    bronze = pl.from_arrow(DeltaTable(str(target)).to_pyarrow_table())
+    assert first_rows == 1
+    assert second_rows == 0
+    assert bronze.height == 1
+
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
+    bronze_runs = runs.filter(pl.col("stage") == "bronze").sort("started_at")
+    assert bronze_runs.height == 2
+    second_details = json.loads(bronze_runs.row(1, named=True)["details"])
+    assert second_details["rows_skipped_duplicate"] == 1
 
 
 def test_load_parquet_dir_returns_empty_bronze_schema(tmp_path: Path) -> None:
