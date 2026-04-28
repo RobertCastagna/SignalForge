@@ -8,7 +8,7 @@ import polars as pl
 from pandera.polars import Column, DataFrameSchema
 
 from amdc.config import BM25_THRESHOLD, SITES, TEXT_CHAR_CAP
-from amdc_lake.quality.checks import text_passes_junk
+from amdc_lake.quality.checks import text_is_not_error_page, text_passes_junk
 
 
 def _allowed_domains() -> list[str]:
@@ -45,12 +45,18 @@ def bronze_schema() -> DataFrameSchema:
             "text": Column(
                 pl.Utf8,
                 checks=[
-                    pa.Check.str_length(min_value=1, max_value=TEXT_CHAR_CAP),
+                    pa.Check.str_length(min_value=50, max_value=TEXT_CHAR_CAP),
                     pa.Check(
                         text_passes_junk,
                         element_wise=True,
                         name="url_junk_ratio_le_0.5",
                         error="text is more than 50% URL-structured (junk)",
+                    ),
+                    pa.Check(
+                        text_is_not_error_page,
+                        element_wise=True,
+                        name="text_not_error_page",
+                        error="text matches error/paywall sentinel",
                     ),
                 ],
                 nullable=False,
