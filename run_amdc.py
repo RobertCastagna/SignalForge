@@ -100,7 +100,7 @@ def _trigger_pipeline(query: str, data_dir: Path, lake_dir: Path) -> None:
     log.info("pipeline: bronze append wrote %d row(s) to %s", bronze_rows, bronze_target)
     pages_target, chunks_target, page_rows, chunk_rows = build_silver(lake_dir)
     log.info(
-        "pipeline: silver rebuilt — %d page row(s), %d chunk row(s)",
+        "pipeline: silver wrote %d new page row(s), %d new chunk row(s)",
         page_rows,
         chunk_rows,
     )
