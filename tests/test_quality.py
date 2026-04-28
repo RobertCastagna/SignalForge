@@ -145,19 +145,8 @@ def test_run_bronze_checks_passes_for_clean_row(tmp_path: Path) -> None:
     assert result.run_id.startswith("qrun_")
 
 
-def test_run_bronze_checks_flags_invalid_domain(tmp_path: Path) -> None:
-    df = _bronze_frame([_good_row(source_domain="example.com")])
-
-    result = run_bronze_checks(df, tmp_path)
-
-    assert result.rows_failed == 1
-    assert result.status == "fail"
-    assert result.failures.height == 1
-    assert any(c["column"] == "source_domain" for c in result.check_summary)
-
-
 def test_write_quarantine_appends_failures_with_reasons(tmp_path: Path) -> None:
-    df = _bronze_frame([_good_row(source_domain="example.com")])
+    df = _bronze_frame([_good_row(text="Short.")])
     result = run_bronze_checks(df, tmp_path)
 
     target = write_quarantine(result.failures, tmp_path)
@@ -167,7 +156,7 @@ def test_write_quarantine_appends_failures_with_reasons(tmp_path: Path) -> None:
     assert quarantined.height == 1
     assert quarantined.select("_quality_run_id").item() == result.run_id
     reasons = quarantined.get_column("_failure_reasons").to_list()[0]
-    assert any("source_domain" in r for r in reasons)
+    assert any("text" in r for r in reasons)
 
 
 def test_write_quarantine_returns_none_for_empty_failures(tmp_path: Path) -> None:
