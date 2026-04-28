@@ -60,7 +60,11 @@ def test_compute_run_drift_returns_baseline_when_no_history() -> None:
 def test_compute_run_drift_flags_row_count_drop() -> None:
     rows = []
     counter = 0
-    for ts in ("2026-04-21T00:00:00+00:00", "2026-04-22T00:00:00+00:00", "2026-04-23T00:00:00+00:00"):
+    for ts in (
+        "2026-04-21T00:00:00+00:00",
+        "2026-04-22T00:00:00+00:00",
+        "2026-04-23T00:00:00+00:00",
+    ):
         for _ in range(5):
             rows.append(
                 _good_row(
@@ -90,7 +94,11 @@ def test_compute_run_drift_detects_missing_domain_present_in_history() -> None:
                 ingested_at=ts,
             )
             for i, ts in enumerate(
-                ["2026-04-21T00:00:00+00:00", "2026-04-22T00:00:00+00:00", "2026-04-23T00:00:00+00:00"]
+                [
+                    "2026-04-21T00:00:00+00:00",
+                    "2026-04-22T00:00:00+00:00",
+                    "2026-04-23T00:00:00+00:00",
+                ]
             )
             for domain in ("cnbc.com", "finviz.com")
         ]

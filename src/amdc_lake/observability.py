@@ -4,6 +4,7 @@
 status/rows/details, and appends one row to `{lake_dir}/_pipeline/runs`. It
 always writes the row, even on exception, then re-raises.
 """
+
 from __future__ import annotations
 
 import json

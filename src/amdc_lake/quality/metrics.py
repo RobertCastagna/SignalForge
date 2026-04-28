@@ -1,4 +1,5 @@
 """Append-only metrics table for quality run history."""
+
 from __future__ import annotations
 
 import json

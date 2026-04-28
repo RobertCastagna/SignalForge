@@ -1,4 +1,5 @@
 """Pandera schema for the Bronze scrapes table."""
+
 from __future__ import annotations
 
 from urllib.parse import urlparse
@@ -13,9 +14,7 @@ from amdc_lake.quality.checks import text_passes_junk
 
 def _allowed_domains() -> list[str]:
     """Derive allowed root domains from amdc.config.SITES."""
-    return sorted(
-        {urlparse(site["url"]).netloc.removeprefix("www.") for site in SITES}
-    )
+    return sorted({urlparse(site["url"]).netloc.removeprefix("www.") for site in SITES})
 
 
 def bronze_schema() -> DataFrameSchema:

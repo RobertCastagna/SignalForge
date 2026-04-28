@@ -43,7 +43,9 @@ def test_amdc_run_writes_parquet_and_no_pipeline_run_without_lake_dir(
     _patch_crawl_all(
         monkeypatch,
         raw=[_kept_page()],
-        site_stats=[{"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None}],
+        site_stats=[
+            {"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None}
+        ],
     )
 
     result = runner.invoke(app, ["markets", "--data-dir", str(data_dir)])
@@ -65,7 +67,9 @@ def test_amdc_run_with_lake_dir_appends_success_pipeline_run(
     _patch_crawl_all(
         monkeypatch,
         raw=[_kept_page()],
-        site_stats=[{"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None}],
+        site_stats=[
+            {"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None}
+        ],
     )
 
     result = runner.invoke(
@@ -96,7 +100,12 @@ def test_amdc_run_records_partial_when_one_site_errored(
         raw=[_kept_page()],
         site_stats=[
             {"site": "cnbc.com", "pages_kept": 1, "pages_dropped": 0, "error": None},
-            {"site": "finviz.com", "pages_kept": 0, "pages_dropped": 0, "error": "RuntimeError('boom')"},
+            {
+                "site": "finviz.com",
+                "pages_kept": 0,
+                "pages_dropped": 0,
+                "error": "RuntimeError('boom')",
+            },
         ],
     )
 
@@ -122,7 +131,14 @@ def test_amdc_run_records_fail_when_zero_records(
     _patch_crawl_all(
         monkeypatch,
         raw=[],
-        site_stats=[{"site": "cnbc.com", "pages_kept": 0, "pages_dropped": 0, "error": "RuntimeError('x')"}],
+        site_stats=[
+            {
+                "site": "cnbc.com",
+                "pages_kept": 0,
+                "pages_dropped": 0,
+                "error": "RuntimeError('x')",
+            }
+        ],
     )
 
     result = runner.invoke(
