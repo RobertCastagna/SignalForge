@@ -8,8 +8,10 @@ from deltalake import DeltaTable
 from amdc_lake.bronze import BRONZE_SCHEMA
 from amdc_lake.paths import bronze_scrapes_quarantine_path
 from amdc_lake.quality.checks import (
+    compute_null_counts,
     compute_run_drift,
     text_is_not_error_page,
+    find_title_duplicate_clusters,
     text_passes_junk,
     url_junk_ratio,
 )
@@ -199,3 +201,96 @@ def test_run_bronze_checks_rejects_error_page_text(tmp_path: Path) -> None:
         c["column"] == "text" and "sentinel" in c["check"]
         for c in result.check_summary
     )
+def test_compute_null_counts_reports_per_column() -> None:
+    df = _bronze_frame(
+        [
+            _good_row(bronze_id=f"bronze_{0:064x}", date_published=None, title=None),
+            _good_row(bronze_id=f"bronze_{1:064x}", date_published="2026-04-28"),
+        ]
+    )
+
+    counts = compute_null_counts(df)
+
+    assert counts["title"] == 1
+    assert counts["date_published"] == 1
+    assert counts["text"] == 0
+    assert counts["bronze_id"] == 0
+
+
+def test_find_title_duplicate_clusters_groups_high_cosine() -> None:
+    df = _bronze_frame(
+        [
+            _good_row(bronze_id=f"bronze_{0:064x}", title="Fed raises rates today"),
+            _good_row(bronze_id=f"bronze_{1:064x}", title="Fed raises rates today!"),
+            _good_row(bronze_id=f"bronze_{2:064x}", title="Apple unveils new chip"),
+        ]
+    )
+
+    def stub_embed(titles):
+        mapping = {
+            "Fed raises rates today": [1.0, 0.0, 0.0],
+            "Fed raises rates today!": [0.99, 0.141, 0.0],
+            "Apple unveils new chip": [0.0, 1.0, 0.0],
+        }
+        return [mapping[t] for t in titles]
+
+    clusters = find_title_duplicate_clusters(df, stub_embed, threshold=0.95)
+
+    assert len(clusters) == 1
+    assert clusters[0]["size"] == 2
+    assert set(clusters[0]["bronze_ids"]) == {
+        f"bronze_{0:064x}",
+        f"bronze_{1:064x}",
+    }
+    assert clusters[0]["max_similarity"] >= 0.95
+
+
+def test_find_title_duplicate_clusters_returns_empty_when_below_threshold() -> None:
+    df = _bronze_frame(
+        [
+            _good_row(bronze_id=f"bronze_{0:064x}", title="Fed raises rates today"),
+            _good_row(bronze_id=f"bronze_{1:064x}", title="Apple unveils new chip"),
+        ]
+    )
+
+    def stub_embed(titles):
+        mapping = {
+            "Fed raises rates today": [1.0, 0.0, 0.0],
+            "Apple unveils new chip": [0.0, 1.0, 0.0],
+        }
+        return [mapping[t] for t in titles]
+
+    assert find_title_duplicate_clusters(df, stub_embed, threshold=0.95) == []
+
+
+def test_run_bronze_checks_records_nulls_and_duplicates(tmp_path: Path) -> None:
+    df = _bronze_frame(
+        [
+            _good_row(
+                bronze_id=f"bronze_{0:064x}",
+                title="Fed raises rates today",
+                date_published=None,
+            ),
+            _good_row(
+                bronze_id=f"bronze_{1:064x}",
+                title="Fed raises rates today!",
+            ),
+        ]
+    )
+
+    def stub_embed(titles):
+        mapping = {
+            "Fed raises rates today": [1.0, 0.0, 0.0],
+            "Fed raises rates today!": [0.99, 0.141, 0.0],
+        }
+        return [mapping[t] for t in titles]
+
+    result = run_bronze_checks(
+        df, tmp_path, embed_fn=stub_embed, duplicate_threshold=0.95
+    )
+
+    assert result.null_counts["date_published"] == 1
+    assert result.null_counts["text"] == 0
+    assert len(result.duplicate_clusters) == 1
+    assert result.duplicate_clusters[0]["size"] == 2
+    assert result.status == "warn"

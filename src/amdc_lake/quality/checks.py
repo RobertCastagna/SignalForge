@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Callable, Sequence
 
 import polars as pl
 
@@ -19,6 +20,8 @@ _ERROR_PAGE_RE = re.compile(
     r"|subscribe\s+to\s+(?:read|continue)"
     r")"
 )
+
+EmbedFn = Callable[[Sequence[str]], list[list[float]]]
 
 
 def url_junk_ratio(text: str | None) -> float:
@@ -150,3 +153,88 @@ def compute_run_drift(
             )
 
     return findings
+
+
+def compute_null_counts(df: pl.DataFrame) -> dict[str, int]:
+    if df.is_empty():
+        return {col: 0 for col in df.columns}
+    nulls = df.null_count().row(0, named=True)
+    return {col: int(value) for col, value in nulls.items()}
+
+
+def find_title_duplicate_clusters(
+    df: pl.DataFrame,
+    embed_fn: EmbedFn,
+    *,
+    threshold: float = 0.95,
+    min_title_chars: int = 8,
+) -> list[dict]:
+    """Cluster rows whose title embeddings have cosine similarity >= threshold.
+
+    Embeddings are assumed L2-normalized (BGE output is normalized in `BgeM3Embedder`),
+    so cosine similarity reduces to a dot product.
+    """
+    if df.is_empty() or "title" not in df.columns or "bronze_id" not in df.columns:
+        return []
+
+    candidates = df.select(["bronze_id", "title"]).filter(
+        pl.col("title").is_not_null()
+        & (pl.col("title").str.len_chars() >= min_title_chars)
+    )
+    if candidates.height < 2:
+        return []
+
+    bronze_ids = candidates.get_column("bronze_id").to_list()
+    titles = candidates.get_column("title").to_list()
+    vectors = embed_fn(titles)
+    if not vectors:
+        return []
+
+    n = len(vectors)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    pair_sims: dict[tuple[int, int], float] = {}
+    for i in range(n):
+        vi = vectors[i]
+        for j in range(i + 1, n):
+            vj = vectors[j]
+            sim = sum(a * b for a, b in zip(vi, vj))
+            if sim >= threshold:
+                union(i, j)
+                pair_sims[(i, j)] = sim
+
+    if not pair_sims:
+        return []
+
+    groups: dict[int, list[int]] = {}
+    for idx in range(n):
+        groups.setdefault(find(idx), []).append(idx)
+
+    clusters: list[dict] = []
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        max_sim = max(
+            sim for (i, j), sim in pair_sims.items() if i in members and j in members
+        )
+        clusters.append(
+            {
+                "size": len(members),
+                "max_similarity": float(max_sim),
+                "bronze_ids": [bronze_ids[m] for m in members],
+                "titles": [titles[m] for m in members],
+            }
+        )
+    clusters.sort(key=lambda c: (-c["size"], -c["max_similarity"]))
+    return clusters
