@@ -113,6 +113,22 @@ docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler
 docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler silver-build --lake-dir /app/data/lakehouse
 ```
 
+## Self-updating search UI
+
+`run_amdc.py` searches the Silver chunk cache and, when too few articles clear
+the similarity threshold, can run a fresh crawl plus Bronze/Silver rebuild
+before returning results. A lightweight Streamlit wrapper is available for that
+same orchestrator path:
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+The UI caps search text at 200 characters, exposes `no_crawl` and `threshold`,
+keeps `min_articles=10` and `top_k=20`, and displays matches in an interactive
+dataframe. When a crawl runs, the captured orchestrator logs are shown in a
+collapsed expander.
+
 ## Observing pipeline runs
 
 Every Bronze and Silver build appends one row per stage to `{lake_dir}/_pipeline/runs`

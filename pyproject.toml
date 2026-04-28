@@ -10,6 +10,7 @@ dependencies = [
     "polars>=1.0",
     "pyarrow>=17",
     "safetensors>=0.4",
+    "streamlit>=1.36",
     "torch>=2.4,<3; sys_platform != 'darwin' or platform_machine != 'x86_64'",
     "transformers>=4.44,<5",
     "typer>=0.12",
