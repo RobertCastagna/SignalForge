@@ -64,11 +64,12 @@ Docker (recommended for reproducibility — see `README.md` for the full set):
 
 ```bash
 docker build -t market-crawler .
-docker run --rm -v "$(pwd)/data:/app/data" market-crawler "<query>"
-docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler \
+docker run --rm -p 8501:8501 -v "$(pwd)/data:/app/data" market-crawler
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc "<query>"
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc-lake \
   silver-build --lake-dir /app/data/lakehouse
 
-docker run --rm --entrypoint pytest market-crawler tests
+docker run --rm market-crawler pytest tests
 ```
 
 ## Data conventions

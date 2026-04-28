@@ -1,0 +1,10 @@
+services:
+  amdc:
+    build: .
+    image: market-crawler
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+    environment:
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"

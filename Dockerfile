@@ -23,9 +23,16 @@ RUN uv sync --frozen --group test
 RUN python -m playwright install --with-deps chromium
 RUN python -c "from transformers import AutoModel, AutoTokenizer; name='BAAI/bge-small-en-v1.5'; AutoTokenizer.from_pretrained(name); AutoModel.from_pretrained(name)"
 
+COPY run_amdc.py streamlit_app.py show_latest.py ./
 COPY tests ./tests
 
-RUN mkdir -p /app/data/lakehouse/bronze /app/data/lakehouse/silver /app/data/lakehouse/gold
+RUN mkdir -p \
+    /app/data/lakehouse/bronze \
+    /app/data/lakehouse/silver \
+    /app/data/lakehouse/gold \
+    /app/data/lakehouse/_quality \
+    /app/data/lakehouse/_pipeline
 VOLUME ["/app/data"]
+EXPOSE 8501
 
-ENTRYPOINT ["python", "-m", "amdc.main"]
+CMD ["streamlit", "run", "streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501", "--server.headless=true"]
