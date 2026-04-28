@@ -111,9 +111,7 @@ def _search(
         return _empty_results()
 
     chunks = pl.from_arrow(
-        DeltaTable(str(chunks_path)).to_pyarrow_table(
-            columns=["page_id", "embedding"]
-        )
+        DeltaTable(str(chunks_path)).to_pyarrow_table(columns=["page_id", "embedding"])
     )
     if chunks.is_empty():
         log.info("cache: silver is empty (no chunks indexed yet)")
@@ -176,7 +174,9 @@ def _trigger_pipeline(query: str, data_dir: Path, lake_dir: Path) -> None:
     bronze_target, bronze_rows = backfill_parquet(
         data_dir, lake_dir, mode="append", validate=True
     )
-    log.info("pipeline: bronze append wrote %d row(s) to %s", bronze_rows, bronze_target)
+    log.info(
+        "pipeline: bronze append wrote %d row(s) to %s", bronze_rows, bronze_target
+    )
     pages_target, chunks_target, page_rows, chunk_rows = build_silver(lake_dir)
     log.info(
         "pipeline: silver wrote %d new page row(s), %d new chunk row(s)",
@@ -284,7 +284,9 @@ def run(
         f"query={query!r} matches={result.final_matches} threshold={threshold} "
         f"min_articles={min_articles}"
     )
-    with pl.Config(tbl_rows=top_k, tbl_cols=-1, fmt_str_lengths=80, tbl_width_chars=200):
+    with pl.Config(
+        tbl_rows=top_k, tbl_cols=-1, fmt_str_lengths=80, tbl_width_chars=200
+    ):
         print(result.hits)
 
 

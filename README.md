@@ -1,16 +1,22 @@
 # Adaptive Market Data Crawler (AMDC)
 
-Dockerized Python CLI that runs `crawl4ai`'s `BestFirstCrawlingStrategy` (with
-BM25 content filtering and keyword scoring) against three predefined market-data
-sites — CNBC, Investing.com, and Finviz — for a given search query, then writes
-results to parquet for downstream `polars` analysis. A companion Delta Lake
-pipeline (`amdc-lake`) promotes those parquet outputs through Bronze (with
-Pandera data-quality validation) and Silver (page- and chunk-level tables with
-384-dim BAAI/bge-small-en-v1.5 embeddings). A self-updating RAG entrypoint
+This tool is built to help researchers retrieve sample data for building/testing an NLP pipeline.
+It lets you search existing market articles in the AMDC lakehouse; when cached matches are thin,
+the orchestrator can crawl fresh sources, run Bronze data-quality checks, rebuild Silver embeddings,
+and return updated news article results from the web.
+
+
+Dockerized Streamlit app and Python CLI that run `crawl4ai`'s
+`BestFirstCrawlingStrategy` (with BM25 content filtering and keyword scoring)
+against predefined market-data sites, then write results to parquet for
+downstream `polars` analysis. A companion Delta Lake pipeline (`amdc-lake`)
+promotes those parquet outputs through Bronze (with Pandera data-quality
+validation) and Silver (page- and chunk-level tables with 384-dim
+BAAI/bge-small-en-v1.5 embeddings). A self-updating RAG entrypoint
 (`run_amdc.py`) embeds a query, scores it against Silver chunk embeddings, and
 auto-triggers a fresh crawl + Bronze + Silver build when the cache is thin.
-Every stage records a durable run row to `_pipeline/runs` so timing, row
-counts, and per-site / per-batch detail are inspectable after the fact.
+Every stage records a durable run row to `_pipeline/runs` so timing, row counts,
+and per-site / per-batch detail are inspectable after the fact.
 
 ## Stack
 
@@ -33,21 +39,40 @@ The first build is slow because Chromium is downloaded by `playwright install`.
 The image also pre-downloads `BAAI/bge-small-en-v1.5`, so the first Silver build does not
 need to fetch model weights at runtime.
 
-## Run
+## Run the Streamlit app
 
 ```bash
 mkdir -p data
-docker run --rm -v "$(pwd)/data:/app/data" market-crawler "semiconductor supply chain"
+docker run --rm -p 8501:8501 -v "$(pwd)/data:/app/data" market-crawler
 ```
 
-On success, the container prints:
+Open `http://localhost:8501`. The container runs the full AMDC UI by default:
+query search, optional crawl, Bronze/Silver rebuilds, result display, and Data
+Quality run history.
 
-```
-Wrote N rows -> /app/data/market_data_<UTC timestamp>.parquet
+You can also launch the same app with Docker Compose:
+
+```bash
+docker compose up --build
 ```
 
-That file lives on the host at `./data/market_data_<UTC timestamp>.parquet`
-because of the volume mount.
+The `./data` bind mount persists raw parquet files, Delta Lake tables,
+pipeline runs, and quality runs between container launches.
+
+## Run CLI commands in Docker
+
+The same image still contains the crawler CLI, lakehouse CLI, RAG entrypoint,
+and tests. Override the default Streamlit command as needed:
+
+```bash
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc "semiconductor supply chain" --data-dir /app/data
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc-lake init --lake-dir /app/data/lakehouse
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler python run_amdc.py "semiconductor supply chain"
+docker run --rm market-crawler pytest tests
+```
+
+Crawler CLI output files live on the host under `./data` because of the volume
+mount.
 
 ## Read the output with polars
 
@@ -112,12 +137,12 @@ overwrite when schemas change or the embedding model is swapped.
 
 Gold is intentionally empty until downstream analytics requirements are added.
 
-With Docker, run the lake CLI by overriding the entrypoint:
+With Docker, run the lake CLI by overriding the default Streamlit command:
 
 ```bash
-docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler init --lake-dir /app/data/lakehouse
-docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler bronze-backfill --input-dir /app/data --lake-dir /app/data/lakehouse
-docker run --rm -v "$(pwd)/data:/app/data" --entrypoint amdc-lake market-crawler silver-build --lake-dir /app/data/lakehouse
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc-lake init --lake-dir /app/data/lakehouse
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc-lake bronze-backfill --input-dir /app/data --lake-dir /app/data/lakehouse
+docker run --rm -v "$(pwd)/data:/app/data" market-crawler amdc-lake silver-build --lake-dir /app/data/lakehouse
 ```
 
 ## Self-updating search UI
@@ -138,6 +163,13 @@ caps text at 200 characters, exposes `no_crawl` and `threshold`, keeps
 dataframe. The Data Quality tab reads `_quality/runs`, sorts runs newest-first,
 and turns nested check, drift, null, and duplicate-cluster JSON into readable
 columns with sidebar filters.
+
+Docker runs the same UI by default:
+
+```bash
+docker run --rm -p 8501:8501 -v "$(pwd)/data:/app/data" market-crawler
+```
+
 ## Self-updating RAG query
 
 `run_amdc.py` is a query-time entrypoint that closes the loop between the
@@ -284,7 +316,7 @@ To run the same tests inside the Docker image:
 
 ```bash
 docker build -t market-crawler .
-docker run --rm --entrypoint pytest market-crawler tests
+docker run --rm market-crawler pytest tests
 ```
 
 ## Error handling
