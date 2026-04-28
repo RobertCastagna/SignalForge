@@ -104,6 +104,20 @@ def write_bronze(
     return target
 
 
+def _build_title_embed_fn():
+    try:
+        from amdc_lake.embedder import BgeM3Embedder
+
+        embedder = BgeM3Embedder()
+    except Exception:
+        log.warning(
+            "bronze: failed to init title embedder; skipping duplicate-title check",
+            exc_info=True,
+        )
+        return None
+    return lambda texts: embedder.embed(texts, batch_size=32)
+
+
 def backfill_parquet(
     input_dir: Path,
     lake_dir: Path,
@@ -126,7 +140,8 @@ def backfill_parquet(
             from amdc_lake.quality.quarantine import write_quarantine
             from amdc_lake.quality.runner import run_bronze_checks
 
-            result = run_bronze_checks(df, lake_dir)
+            embed_fn = _build_title_embed_fn()
+            result = run_bronze_checks(df, lake_dir, embed_fn=embed_fn)
             write_quarantine(result.failures, lake_dir)
             append_run(result, lake_dir)
             quality_run_id = result.run_id

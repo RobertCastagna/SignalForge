@@ -24,6 +24,8 @@ RUNS_SCHEMA: dict[str, pl.DataType] = {
     "status": pl.Utf8,
     "check_summary": pl.Utf8,
     "drift_report": pl.Utf8,
+    "null_counts": pl.Utf8,
+    "duplicate_clusters": pl.Utf8,
     "lake_dir": pl.Utf8,
 }
 
@@ -44,6 +46,8 @@ def append_run(result: "QualityResult", lake_dir: Path) -> Path:
             "status": [result.status],
             "check_summary": [json.dumps(result.check_summary)],
             "drift_report": [json.dumps(result.drift_report)],
+            "null_counts": [json.dumps(result.null_counts)],
+            "duplicate_clusters": [json.dumps(result.duplicate_clusters)],
             "lake_dir": [str(lake_dir)],
         },
         schema=RUNS_SCHEMA,
