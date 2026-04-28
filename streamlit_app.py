@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import polars as pl
 import streamlit as st
@@ -24,32 +23,6 @@ _RAW_DQ_COLUMNS = [
     "Raw Null Counts",
     "Raw Duplicate Clusters",
 ]
-
-
-class _ListLogHandler(logging.Handler):
-    def __init__(self) -> None:
-        super().__init__(level=logging.INFO)
-        self.messages: list[str] = []
-        self.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
-
-    def emit(self, record: logging.LogRecord) -> None:
-        self.messages.append(self.format(record))
-
-
-@contextmanager
-def _capture_info_logs() -> Iterator[_ListLogHandler]:
-    handler = _ListLogHandler()
-    root = logging.getLogger()
-    previous_level = root.level
-    root.addHandler(handler)
-    root.setLevel(min(previous_level, logging.INFO))
-    try:
-        yield handler
-    finally:
-        root.removeHandler(handler)
-        root.setLevel(previous_level)
 
 
 @st.cache_resource(show_spinner="Loading embedding model...")
@@ -300,22 +273,20 @@ def _render_search_tab() -> None:
         st.warning("Enter a search query.")
         return
 
-    with st.spinner("Running AMDC query..."):
-        with _capture_info_logs() as logs:
-            result = orchestrate_query(
-                query,
-                threshold=threshold,
-                min_articles=DEFAULT_MIN_ARTICLES,
-                top_k=DEFAULT_TOP_K,
-                no_crawl=no_crawl,
-                embedder=_get_embedder(),
-            )
+    with st.spinner(
+        "Running AMDC pipeline... long crawls can take a while; "
+        "check console logs for live progress."
+    ):
+        result = orchestrate_query(
+            query,
+            threshold=threshold,
+            min_articles=DEFAULT_MIN_ARTICLES,
+            top_k=DEFAULT_TOP_K,
+            no_crawl=no_crawl,
+            embedder=_get_embedder(),
+        )
 
     st.info(result.status_message)
-
-    if result.crawled:
-        with st.expander("Crawler logs", expanded=False):
-            st.code("\n".join(logs.messages) or "No logs captured.", language="text")
 
     _render_results(result)
 
