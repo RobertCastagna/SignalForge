@@ -56,12 +56,14 @@ def _extract_date(page: dict, body: str) -> str | None:
 
 
 def _extract_body(page: dict) -> str:
-    # Prefer the BM25-filtered fit_markdown. Do NOT fall back to raw_markdown:
-    # raw is the full page including site nav/footer chrome, and we'd rather
-    # save nothing than save nav. The crawler-side post-filter already drops
-    # pages where fit is empty, so this should reliably yield article text.
+    # Prefer the BM25-filtered fit_markdown. Fall back to raw_markdown when fit
+    # is empty: the crawler gate now admits long articles whose BM25 trim
+    # collapsed fit to nothing, so without this fallback those rows would have
+    # empty text. Raw includes some site nav/footer chrome — downstream
+    # chunking deals with it.
     body = _first(
         page.get("fit_markdown"),
+        page.get("raw_markdown"),
         page.get("markdown"),
         page.get("content"),
         page.get("text"),
