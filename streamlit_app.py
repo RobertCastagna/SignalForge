@@ -266,10 +266,11 @@ digraph {
 
 def _render_header() -> None:
     st.title("Adaptive Market Data Crawler")
+    st.write("This tool is build to assist a researcher who is looking to retrieve sample data for building an NLP pipeline.")
     st.write(
-        "Search market articles in the AMDC lakehouse. When cached matches are "
+        "It lets you search existing market articles in the AMDC lakehouse. When cached matches are "
         "thin, the orchestrator can crawl fresh sources, run Bronze data "
-        "quality, rebuild Silver embeddings, and return updated results."
+        "quality, rebuild Silver embeddings, and return updated results fresh from the web."
     )
     st.graphviz_chart(_process_flow_dot(), width="stretch")
 

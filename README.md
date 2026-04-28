@@ -1,5 +1,11 @@
 # Adaptive Market Data Crawler (AMDC)
 
+This tool is built to help researchers retrieve sample data for building/testing an NLP pipeline.
+It lets you search existing market articles in the AMDC lakehouse; when cached matches are thin,
+the orchestrator can crawl fresh sources, run Bronze data-quality checks, rebuild Silver embeddings,
+and return updated news article results from the web.
+
+
 Dockerized Python CLI that runs `crawl4ai`'s `BestFirstCrawlingStrategy` (with
 BM25 content filtering and keyword scoring) against three predefined market-data
 sites — CNBC, Investing.com, and Finviz — for a given search query, then writes
