@@ -124,10 +124,13 @@ same orchestrator path:
 uv run streamlit run streamlit_app.py
 ```
 
-The UI caps search text at 200 characters, exposes `no_crawl` and `threshold`,
-keeps `min_articles=10` and `top_k=20`, and displays matches in an interactive
-dataframe. When a crawl runs, the captured orchestrator logs are shown in a
-collapsed expander.
+The UI is titled `Adaptive Market Data Crawler`, includes a process-flow
+diagram, and splits the experience into Search and Data Quality tabs. Search
+caps text at 200 characters, exposes `no_crawl` and `threshold`, keeps
+`min_articles=10` and `top_k=20`, and displays matches in an interactive
+dataframe. The Data Quality tab reads `_quality/runs`, sorts runs newest-first,
+and turns nested check, drift, null, and duplicate-cluster JSON into readable
+columns with sidebar filters.
 
 ## Observing pipeline runs
 

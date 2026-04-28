@@ -150,3 +150,72 @@ def test_streamlit_app_import_has_no_runtime_side_effects() -> None:
     import streamlit_app
 
     assert streamlit_app.DEFAULT_MIN_ARTICLES == 10
+
+
+def test_format_quality_runs_sorts_and_humanizes_json() -> None:
+    import streamlit_app
+
+    raw = pl.DataFrame(
+        {
+            "run_id": ["old", "new"],
+            "layer": ["bronze", "bronze"],
+            "started_at": [
+                "2026-04-28T10:00:00+00:00",
+                "2026-04-28T12:00:00+00:00",
+            ],
+            "finished_at": [
+                "2026-04-28T10:00:02+00:00",
+                "2026-04-28T12:00:02+00:00",
+            ],
+            "rows_in": [10, 12],
+            "rows_passed": [9, 10],
+            "rows_failed": [1, 2],
+            "status": ["pass", "warn"],
+            "check_summary": [
+                "[]",
+                '[{"column":"text","check":"min_length","failed":2}]',
+            ],
+            "drift_report": [
+                "[]",
+                '[{"domain":"finviz.com","metric":"rows","note":"rows dropped"}]',
+            ],
+            "null_counts": [
+                '{"title":0,"date_published":0}',
+                '{"title":1,"date_published":2}',
+            ],
+            "duplicate_clusters": [
+                "[]",
+                '[{"size":3,"max_similarity":0.987}]',
+            ],
+            "lake_dir": ["data/lakehouse", "data/lakehouse"],
+        }
+    )
+
+    formatted = streamlit_app._format_quality_runs(raw)
+
+    assert formatted.get_column("Run ID").to_list() == ["new", "old"]
+    newest = formatted.row(0, named=True)
+    assert newest["Status"] == "WARN"
+    assert newest["Checks Failed"] == "text: 2 failed (min_length)"
+    assert "finviz.com: rows" in newest["Drift Findings"]
+    assert newest["Null Columns"] == "date_published: 2; title: 1"
+    assert newest["Duplicate Clusters"] == (
+        "1 cluster(s); max size 3; max similarity 0.987"
+    )
+
+
+def test_quality_json_helpers_tolerate_empty_and_malformed_values() -> None:
+    import streamlit_app
+
+    assert streamlit_app._parse_json_value("", []) == []
+    assert streamlit_app._parse_json_value("not-json", {}) == {}
+    assert streamlit_app._summarize_checks([]) == "None"
+    assert streamlit_app._summarize_drift([]) == "None"
+    assert streamlit_app._summarize_nulls({"title": 0}) == "None"
+    assert streamlit_app._summarize_duplicates([]) == "None"
+
+
+def test_read_quality_runs_missing_table_returns_empty(tmp_path: Path) -> None:
+    import streamlit_app
+
+    assert streamlit_app._read_quality_runs(tmp_path).is_empty()
