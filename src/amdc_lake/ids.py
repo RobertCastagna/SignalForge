@@ -25,6 +25,4 @@ def normalize_url(url: str | None) -> str | None:
     if not parts.scheme or not parts.netloc:
         return None
     path = parts.path.rstrip("/") if parts.path != "/" else ""
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), path, "", "")
-    )
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, "", ""))
