@@ -176,7 +176,6 @@ def _empty_quality_display() -> pl.DataFrame:
             "Run Started": pl.Utf8,
             "Run Finished": pl.Utf8,
             "Layer": pl.Utf8,
-            "Status": pl.Utf8,
             "Rows In": pl.Int64,
             "Rows Passed": pl.Int64,
             "Rows Failed": pl.Int64,
@@ -209,7 +208,6 @@ def _format_quality_runs(runs: pl.DataFrame) -> pl.DataFrame:
                 "Run Started": row.get("started_at"),
                 "Run Finished": row.get("finished_at"),
                 "Layer": row.get("layer"),
-                "Status": (row.get("status") or "").upper(),
                 "Rows In": row.get("rows_in"),
                 "Rows Passed": row.get("rows_passed"),
                 "Rows Failed": row.get("rows_failed"),
@@ -279,7 +277,11 @@ def _render_header() -> None:
 
 def _render_search_tab() -> None:
     with st.form("amdc_search"):
-        query = st.text_input("Search", max_chars=200)
+        query = st.text_input(
+            "Search",
+            max_chars=200,
+            placeholder="fed fund rate or Canada EU relations",
+        )
         no_crawl = st.checkbox("No crawl", value=False)
         threshold = st.select_slider(
             "Cosine similarity threshold",
@@ -325,14 +327,12 @@ def _render_quality_tab() -> None:
         st.info("No data quality runs found at data/lakehouse/_quality/runs.")
         return
 
-    statuses = formatted.get_column("Status").unique().sort().to_list()
     with st.sidebar:
         st.header("Data Quality")
-        selected_statuses = st.multiselect("Status", statuses, default=statuses)
         max_rows = st.selectbox("Max rows", [10, 25, 50, 100], index=1)
         show_raw = st.checkbox("Show raw JSON detail columns", value=False)
 
-    display = formatted.filter(pl.col("Status").is_in(selected_statuses)).head(max_rows)
+    display = formatted.head(max_rows)
     if not show_raw:
         display = display.drop(_RAW_DQ_COLUMNS)
 
