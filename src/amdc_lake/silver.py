@@ -8,6 +8,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
+from typing import Literal
 
 import polars as pl
 from deltalake import DeltaTable
@@ -91,6 +92,17 @@ def read_bronze(lake_dir: Path) -> pl.DataFrame:
     table_path = bronze_scrapes_path(lake_dir)
     table = DeltaTable(str(table_path))
     return pl.from_arrow(table.to_pyarrow_table())
+
+
+def _existing_silver_bronze_ids(pages_target: Path) -> set[str]:
+    if not pages_target.exists():
+        return set()
+    try:
+        table = DeltaTable(str(pages_target))
+    except Exception:
+        return set()
+    arrow = table.to_pyarrow_table(columns=["bronze_id"])
+    return set(arrow.column("bronze_id").to_pylist())
 
 
 def build_pages(bronze: pl.DataFrame, embedder, *, batch_size: int) -> pl.DataFrame:
@@ -215,14 +227,23 @@ def chunk_text(
 
 
 def write_silver(
-    pages: pl.DataFrame, chunks: pl.DataFrame, lake_dir: Path
+    pages: pl.DataFrame,
+    chunks: pl.DataFrame,
+    lake_dir: Path,
+    *,
+    mode: Literal["append", "overwrite"] = "append",
 ) -> tuple[Path, Path]:
     ensure_layers(lake_dir)
     pages_target = silver_pages_path(lake_dir)
     chunks_target = silver_chunks_path(lake_dir)
     pages_target.parent.mkdir(parents=True, exist_ok=True)
-    _align_frame(pages, PAGE_SCHEMA).write_delta(str(pages_target), mode="overwrite")
-    _align_frame(chunks, CHUNK_SCHEMA).write_delta(str(chunks_target), mode="overwrite")
+    write_options = {"schema_mode": "merge"} if mode == "append" else None
+    _align_frame(pages, PAGE_SCHEMA).write_delta(
+        str(pages_target), mode=mode, delta_write_options=write_options
+    )
+    _align_frame(chunks, CHUNK_SCHEMA).write_delta(
+        str(chunks_target), mode=mode, delta_write_options=write_options
+    )
     return pages_target, chunks_target
 
 
@@ -233,11 +254,32 @@ def build_silver(
     chunk_tokens: int = 512,
     chunk_overlap: int = 64,
     device: str | None = None,
+    rebuild: bool = False,
 ) -> tuple[Path, Path, int, int]:
     from amdc_lake.embedder import BgeM3Embedder
 
     bronze = read_bronze(lake_dir)
     log.info("silver: read %d bronze rows", bronze.height)
+
+    pages_target = silver_pages_path(lake_dir)
+    chunks_target = silver_chunks_path(lake_dir)
+    write_mode: Literal["append", "overwrite"] = "overwrite" if rebuild else "append"
+
+    if not rebuild:
+        existing = _existing_silver_bronze_ids(pages_target)
+        if existing:
+            before = bronze.height
+            bronze = bronze.filter(~pl.col("bronze_id").is_in(list(existing)))
+            log.info(
+                "silver: %d/%d bronze row(s) are new (incremental)",
+                bronze.height,
+                before,
+            )
+
+    if bronze.is_empty():
+        log.info("silver: no new bronze rows; skipping embed")
+        return pages_target, chunks_target, 0, 0
+
     pages_rows_in = (
         bronze.with_columns(
             pl.col("text")
@@ -282,7 +324,7 @@ def build_silver(
             model=MODEL_NAME,
         )
 
-    pages_target, chunks_target = write_silver(pages, chunks, lake_dir)
+    pages_target, chunks_target = write_silver(pages, chunks, lake_dir, mode=write_mode)
     return pages_target, chunks_target, pages.height, chunks.height
 
 

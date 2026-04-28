@@ -52,5 +52,9 @@ def append_run(result: "QualityResult", lake_dir: Path) -> Path:
         },
         schema=RUNS_SCHEMA,
     )
-    row.write_delta(str(target), mode="append")
+    row.write_delta(
+        str(target),
+        mode="append",
+        delta_write_options={"schema_mode": "merge"},
+    )
     return target
