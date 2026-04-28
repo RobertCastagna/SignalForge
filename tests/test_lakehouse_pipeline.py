@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import polars as pl
@@ -9,9 +10,11 @@ from deltalake import DeltaTable
 from amdc_lake.bronze import backfill_parquet, load_parquet_dir
 from amdc_lake.constants import EMBEDDING_DIM, MODEL_NAME
 from amdc_lake.ids import sha256_id
+from amdc_lake.observability import record_run
 from amdc_lake.paths import (
     bronze_scrapes_path,
     ensure_layers,
+    pipeline_runs_path,
     silver_chunks_path,
     silver_pages_path,
 )
@@ -19,6 +22,7 @@ from amdc_lake.silver import (
     _validate_vectors,
     build_chunks,
     build_pages,
+    build_silver,
     chunk_text,
     clean_text,
     write_silver,
@@ -60,8 +64,8 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
             "title": "Fed decision",
             "date_published": "2026-04-28",
             "text": "Markets watch the Federal Reserve decision.",
-            "source_url": "https://example.com/fed",
-            "source_domain": "example.com",
+            "source_url": "https://cnbc.com/fed",
+            "source_domain": "cnbc.com",
             "relevance_score": 1.0,
             "query": "Fed rate decision",
             "crawled_at": "2026-04-28T00:00:00+00:00",
@@ -70,8 +74,8 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
             "title": "Fed decision",
             "date_published": "2026-04-28",
             "text": "Markets watch the Federal Reserve decision.",
-            "source_url": "https://example.com/fed",
-            "source_domain": "example.com",
+            "source_url": "https://cnbc.com/fed",
+            "source_domain": "cnbc.com",
             "relevance_score": 1.0,
             "query": "Fed rate decision",
             "crawled_at": "2026-04-28T00:00:00+00:00",
@@ -86,7 +90,27 @@ def test_backfill_parquet_writes_deduped_bronze_delta(tmp_path: Path) -> None:
     assert row_count == 1
     assert bronze.height == 1
     assert bronze.select("bronze_id").item().startswith("bronze_")
-    assert bronze.select("source_file").item().endswith("market_data_20260428T000000Z.parquet")
+    assert (
+        bronze.select("source_file")
+        .item()
+        .endswith("market_data_20260428T000000Z.parquet")
+    )
+
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
+    bronze_runs = runs.filter(pl.col("stage") == "bronze")
+    assert bronze_runs.height == 1
+    bronze_row = bronze_runs.row(0, named=True)
+    assert bronze_row["status"] == "success"
+    assert bronze_row["rows_in"] == 1
+    assert bronze_row["rows_out"] == 1
+    assert bronze_row["duration_ms"] >= 0
+    details = json.loads(bronze_row["details"])
+    assert details["source_files"] == 1
+    assert details["rows_quarantined"] == 0
+    assert details["validate"] is True
+    assert details["quality_run_id"] is not None
 
 
 def test_load_parquet_dir_returns_empty_bronze_schema(tmp_path: Path) -> None:
@@ -173,16 +197,23 @@ def test_build_chunks_validates_chunk_settings_and_embeds_rows() -> None:
 
     assert chunks.height == 2
     assert chunks.select("chunk_index").to_series().to_list() == [0, 1]
-    assert chunks.select("embedding_model").to_series().to_list() == [MODEL_NAME, MODEL_NAME]
+    assert chunks.select("embedding_model").to_series().to_list() == [
+        MODEL_NAME,
+        MODEL_NAME,
+    ]
     assert chunks.select(pl.col("embedding").list.len()).to_series().to_list() == [
         EMBEDDING_DIM,
         EMBEDDING_DIM,
     ]
 
     with pytest.raises(ValueError, match="chunk_tokens"):
-        build_chunks(pages, FakeEmbedder(), batch_size=1, chunk_tokens=0, chunk_overlap=0)
+        build_chunks(
+            pages, FakeEmbedder(), batch_size=1, chunk_tokens=0, chunk_overlap=0
+        )
     with pytest.raises(ValueError, match="chunk_overlap"):
-        build_chunks(pages, FakeEmbedder(), batch_size=1, chunk_tokens=3, chunk_overlap=3)
+        build_chunks(
+            pages, FakeEmbedder(), batch_size=1, chunk_tokens=3, chunk_overlap=3
+        )
 
 
 def test_write_silver_round_trips_delta_vector_columns(tmp_path: Path) -> None:
@@ -251,6 +282,117 @@ def test_ensure_layers_creates_bronze_silver_and_gold(tmp_path: Path) -> None:
 def test_validate_vectors_rejects_wrong_embedding_dim() -> None:
     with pytest.raises(ValueError, match=f"expected {EMBEDDING_DIM}-dimensional"):
         _validate_vectors([[0.0]])
+
+
+def test_build_silver_writes_pages_and_chunks_pipeline_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from amdc_lake.bronze import write_bronze
+
+    lake_dir = tmp_path / "lakehouse"
+    from amdc_lake.bronze import BRONZE_SCHEMA
+
+    bronze = pl.DataFrame(
+        [
+            {
+                "bronze_id": "bronze_a",
+                "title": "Useful",
+                "date_published": "2026-04-28",
+                "text": "alpha beta gamma delta",
+                "source_url": "https://cnbc.com/a",
+                "source_domain": "cnbc.com",
+                "relevance_score": 1.0,
+                "query": "markets",
+                "crawled_at": "2026-04-28T00:00:00+00:00",
+                "source_file": "f.parquet",
+                "ingested_at": "2026-04-28T00:00:00+00:00",
+            }
+        ],
+        schema=BRONZE_SCHEMA,
+    )
+    write_bronze(bronze, lake_dir)
+
+    monkeypatch.setattr(
+        "amdc_lake.embedder.BgeM3Embedder",
+        lambda device=None: FakeEmbedder(),
+    )
+
+    pages_target, chunks_target, page_rows, chunk_rows = build_silver(
+        lake_dir, batch_size=2, chunk_tokens=3, chunk_overlap=1
+    )
+
+    assert pages_target == silver_pages_path(lake_dir)
+    assert chunks_target == silver_chunks_path(lake_dir)
+    assert page_rows == 1
+    assert chunk_rows >= 1
+
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
+    silver_runs = runs.filter(pl.col("stage").is_in(["silver_pages", "silver_chunks"]))
+    assert silver_runs.height == 2
+
+    pages_row = runs.filter(pl.col("stage") == "silver_pages").row(0, named=True)
+    assert pages_row["status"] == "success"
+    assert pages_row["rows_in"] == 1
+    assert pages_row["rows_out"] == 1
+    pages_details = json.loads(pages_row["details"])
+    assert pages_details["batch_size"] == 2
+    assert pages_details["model"] == MODEL_NAME
+    assert "embed_seconds" in pages_details
+
+    chunks_row = runs.filter(pl.col("stage") == "silver_chunks").row(0, named=True)
+    assert chunks_row["status"] == "success"
+    assert chunks_row["rows_in"] == 1
+    assert chunks_row["rows_out"] == chunk_rows
+    chunks_details = json.loads(chunks_row["details"])
+    assert chunks_details["chunk_tokens"] == 3
+    assert chunks_details["chunk_overlap"] == 1
+    assert chunks_details["model"] == MODEL_NAME
+
+
+def test_record_run_appends_success_row(tmp_path: Path) -> None:
+    lake_dir = tmp_path / "lakehouse"
+
+    with record_run("bronze", lake_dir, rows_in=10, query="markets") as handle:
+        handle.set_rows_out(7)
+        handle.update_details(source_files=2, validate=True)
+
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
+    assert runs.height == 1
+    row = runs.row(0, named=True)
+    assert row["stage"] == "bronze"
+    assert row["status"] == "success"
+    assert row["rows_in"] == 10
+    assert row["rows_out"] == 7
+    assert row["query"] == "markets"
+    assert row["duration_ms"] >= 0
+    assert row["error"] is None
+    assert row["run_id"].startswith("prun_")
+    details = json.loads(row["details"])
+    assert details == {"source_files": 2, "validate": True}
+
+
+def test_record_run_records_failure_and_reraises(tmp_path: Path) -> None:
+    lake_dir = tmp_path / "lakehouse"
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with record_run("silver_pages", lake_dir, rows_in=3) as handle:
+            handle.set_rows_out(0)
+            raise RuntimeError("boom")
+
+    runs = pl.from_arrow(
+        DeltaTable(str(pipeline_runs_path(lake_dir))).to_pyarrow_table()
+    )
+    assert runs.height == 1
+    row = runs.row(0, named=True)
+    assert row["stage"] == "silver_pages"
+    assert row["status"] == "fail"
+    assert row["rows_in"] == 3
+    assert row["rows_out"] == 0
+    assert "boom" in row["error"]
 
 
 def test_real_bge_small_embedder_outputs_configured_dimension() -> None:

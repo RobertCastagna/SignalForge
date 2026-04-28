@@ -1,4 +1,5 @@
 """Quarantine writer for failed Bronze rows."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,5 +30,8 @@ def _align(df: pl.DataFrame, schema: dict[str, pl.DataType]) -> pl.DataFrame:
     for name, dtype in schema.items():
         if name not in df.columns:
             df = df.with_columns(pl.lit(None, dtype=dtype).alias(name))
-    casts = [pl.col(name).cast(dtype, strict=False).alias(name) for name, dtype in schema.items()]
+    casts = [
+        pl.col(name).cast(dtype, strict=False).alias(name)
+        for name, dtype in schema.items()
+    ]
     return df.with_columns(casts).select(list(schema))

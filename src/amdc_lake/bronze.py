@@ -1,6 +1,8 @@
 """Bronze Delta ingestion for normalized scrape parquet files."""
+
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -8,7 +10,10 @@ from typing import Literal
 import polars as pl
 
 from amdc_lake.ids import sha256_id
+from amdc_lake.observability import record_run
 from amdc_lake.paths import bronze_scrapes_path, ensure_layers
+
+log = logging.getLogger(__name__)
 
 BRONZE_SCHEMA: dict[str, pl.DataType] = {
     "bronze_id": pl.Utf8,
@@ -31,9 +36,15 @@ def _empty_bronze() -> pl.DataFrame:
     return pl.DataFrame(schema=BRONZE_SCHEMA)
 
 
-def _normalize_frame(df: pl.DataFrame, *, source_file: Path, ingested_at: str) -> pl.DataFrame:
+def _normalize_frame(
+    df: pl.DataFrame, *, source_file: Path, ingested_at: str
+) -> pl.DataFrame:
     for name, dtype in BRONZE_SCHEMA.items():
-        if name not in df.columns and name not in {"bronze_id", "source_file", "ingested_at"}:
+        if name not in df.columns and name not in {
+            "bronze_id",
+            "source_file",
+            "ingested_at",
+        }:
             df = df.with_columns(pl.lit(None, dtype=dtype).alias(name))
 
     df = df.with_columns(
@@ -49,7 +60,8 @@ def _normalize_frame(df: pl.DataFrame, *, source_file: Path, ingested_at: str) -
         pl.col("crawled_at").cast(pl.Utf8, strict=False),
     )
     df = df.with_columns(
-        pl.struct(["source_url", "query", "crawled_at", "title", "text"]).map_elements(
+        pl.struct(["source_url", "query", "crawled_at", "title", "text"])
+        .map_elements(
             lambda row: sha256_id(
                 row["source_url"],
                 row["query"],
@@ -59,7 +71,8 @@ def _normalize_frame(df: pl.DataFrame, *, source_file: Path, ingested_at: str) -
                 prefix="bronze",
             ),
             return_dtype=pl.Utf8,
-        ).alias("bronze_id")
+        )
+        .alias("bronze_id")
     )
     return df.select(list(BRONZE_SCHEMA))
 
@@ -71,18 +84,38 @@ def load_parquet_dir(input_dir: Path) -> pl.DataFrame:
 
     ingested_at = datetime.now(timezone.utc).isoformat()
     frames = [
-        _normalize_frame(pl.read_parquet(path), source_file=path, ingested_at=ingested_at)
+        _normalize_frame(
+            pl.read_parquet(path), source_file=path, ingested_at=ingested_at
+        )
         for path in files
     ]
-    return pl.concat(frames, how="vertical_relaxed").unique(subset=["bronze_id"], keep="first")
+    return pl.concat(frames, how="vertical_relaxed").unique(
+        subset=["bronze_id"], keep="first"
+    )
 
 
-def write_bronze(df: pl.DataFrame, lake_dir: Path, *, mode: WriteMode = "overwrite") -> Path:
+def write_bronze(
+    df: pl.DataFrame, lake_dir: Path, *, mode: WriteMode = "overwrite"
+) -> Path:
     ensure_layers(lake_dir)
     target = bronze_scrapes_path(lake_dir)
     target.parent.mkdir(parents=True, exist_ok=True)
     df.select(list(BRONZE_SCHEMA)).write_delta(str(target), mode=mode)
     return target
+
+
+def _build_title_embed_fn():
+    try:
+        from amdc_lake.embedder import BgeM3Embedder
+
+        embedder = BgeM3Embedder()
+    except Exception:
+        log.warning(
+            "bronze: failed to init title embedder; skipping duplicate-title check",
+            exc_info=True,
+        )
+        return None
+    return lambda texts: embedder.embed(texts, batch_size=32)
 
 
 def backfill_parquet(
@@ -92,18 +125,41 @@ def backfill_parquet(
     mode: WriteMode = "overwrite",
     validate: bool = True,
 ) -> tuple[Path, int]:
+    source_files = len(sorted(input_dir.glob("market_data_*.parquet")))
     df = load_parquet_dir(input_dir)
-    if validate and not df.is_empty():
-        from amdc_lake.quality.metrics import append_run
-        from amdc_lake.quality.quarantine import write_quarantine
-        from amdc_lake.quality.runner import run_bronze_checks
+    rows_loaded = df.height
+    log.info(
+        "bronze: loaded %d rows from %d parquet file(s)", rows_loaded, source_files
+    )
 
-        result = run_bronze_checks(df, lake_dir)
-        write_quarantine(result.failures, lake_dir)
-        append_run(result, lake_dir)
-        if not result.failures.is_empty():
-            df = df.filter(
-                ~pl.col("bronze_id").is_in(result.failures.get_column("bronze_id"))
-            )
-    target = write_bronze(df, lake_dir, mode=mode)
-    return target, df.height
+    with record_run("bronze", lake_dir, rows_in=rows_loaded, logger=log) as handle:
+        rows_quarantined = 0
+        quality_run_id: str | None = None
+        if validate and not df.is_empty():
+            from amdc_lake.quality.metrics import append_run
+            from amdc_lake.quality.quarantine import write_quarantine
+            from amdc_lake.quality.runner import run_bronze_checks
+
+            embed_fn = _build_title_embed_fn()
+            result = run_bronze_checks(df, lake_dir, embed_fn=embed_fn)
+            write_quarantine(result.failures, lake_dir)
+            append_run(result, lake_dir)
+            quality_run_id = result.run_id
+            if not result.failures.is_empty():
+                rows_quarantined = result.failures.height
+                df = df.filter(
+                    ~pl.col("bronze_id").is_in(result.failures.get_column("bronze_id"))
+                )
+        target = write_bronze(df, lake_dir, mode=mode)
+        rows_written = df.height
+        if rows_quarantined > 0:
+            handle.set_status("partial")
+        handle.set_rows_out(rows_written)
+        handle.update_details(
+            source_files=source_files,
+            rows_quarantined=rows_quarantined,
+            validate=validate,
+            mode=mode,
+            quality_run_id=quality_run_id,
+        )
+    return target, rows_written

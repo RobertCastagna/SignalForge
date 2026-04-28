@@ -120,6 +120,17 @@ Lakehouse paths and layer names: `src/amdc_lake/paths.py`.
 feat/<x>  ──▶  dev  ──(PR + integration tests in GitHub UI)──▶  main
 ```
 
+### Working from a plan (Claude / agents)
+
+When a session produces an implementation plan (plan mode, `/plan`, or any explicit design step) and is about to start writing code, **cut a feature branch from `dev` before the first edit**. Do not start coding on `dev` or `main` once a plan exists.
+
+Steps before the first edit:
+1. `git fetch origin && git checkout dev && git pull --ff-only`
+2. `git checkout -b <type>/<short-kebab-summary>` — name derived from the plan, e.g. `feat/bronze-data-quality-layer`, `fix/cnbc-date-parser`.
+3. Then implement.
+
+Override: if the user explicitly says "commit to dev" (or similar), respect that and skip the branch.
+
 ### Commit messages — Conventional Commits
 
 ```

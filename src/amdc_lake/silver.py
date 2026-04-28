@@ -1,21 +1,49 @@
 """Silver Delta transforms and embedding table builds."""
+
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 
 import polars as pl
 from deltalake import DeltaTable
 
 from amdc_lake.constants import EMBEDDING_DIM, MODEL_NAME
 from amdc_lake.ids import sha256_id
+from amdc_lake.observability import record_run
 from amdc_lake.paths import (
     bronze_scrapes_path,
     ensure_layers,
     silver_chunks_path,
     silver_pages_path,
 )
+
+log = logging.getLogger(__name__)
+
+
+class _TimingEmbedder:
+    """Proxy that tracks cumulative seconds spent in embedder.embed."""
+
+    def __init__(self, inner) -> None:
+        self._inner = inner
+        self.elapsed_seconds = 0.0
+
+    def __getattr__(self, name: str):
+        return getattr(self._inner, name)
+
+    def embed(self, texts: list[str], *, batch_size: int = 8) -> list[list[float]]:
+        start = perf_counter()
+        try:
+            return self._inner.embed(texts, batch_size=batch_size)
+        finally:
+            self.elapsed_seconds += perf_counter() - start
+
+    def reset(self) -> None:
+        self.elapsed_seconds = 0.0
+
 
 PAGE_SCHEMA: dict[str, pl.DataType] = {
     "page_id": pl.Utf8,
@@ -75,10 +103,13 @@ def build_pages(bronze: pl.DataFrame, embedder, *, batch_size: int) -> pl.DataFr
         )
         .filter(pl.col("text").str.len_chars() > 0)
         .with_columns(
-            pl.col("text").map_elements(lambda value: sha256_id(value), return_dtype=pl.Utf8).alias("text_hash"),
+            pl.col("text")
+            .map_elements(lambda value: sha256_id(value), return_dtype=pl.Utf8)
+            .alias("text_hash"),
         )
         .with_columns(
-            pl.struct(["bronze_id", "source_url", "query", "text_hash"]).map_elements(
+            pl.struct(["bronze_id", "source_url", "query", "text_hash"])
+            .map_elements(
                 lambda row: sha256_id(
                     row["bronze_id"],
                     row["source_url"],
@@ -87,7 +118,8 @@ def build_pages(bronze: pl.DataFrame, embedder, *, batch_size: int) -> pl.DataFr
                     prefix="page",
                 ),
                 return_dtype=pl.Utf8,
-            ).alias("page_id"),
+            )
+            .alias("page_id"),
             pl.lit(MODEL_NAME).alias("embedding_model"),
             pl.lit(EMBEDDING_DIM).cast(pl.Int32).alias("embedding_dim"),
             pl.lit(embedded_at).alias("embedded_at"),
@@ -114,12 +146,19 @@ def build_chunks(
     if chunk_tokens <= 0:
         raise ValueError("chunk_tokens must be greater than zero")
     if chunk_overlap < 0 or chunk_overlap >= chunk_tokens:
-        raise ValueError("chunk_overlap must be non-negative and smaller than chunk_tokens")
+        raise ValueError(
+            "chunk_overlap must be non-negative and smaller than chunk_tokens"
+        )
 
     embedded_at = datetime.now(timezone.utc).isoformat()
     rows: list[dict] = []
     for row in pages.iter_rows(named=True):
-        chunks = chunk_text(row["text"], embedder, chunk_tokens=chunk_tokens, chunk_overlap=chunk_overlap)
+        chunks = chunk_text(
+            row["text"],
+            embedder,
+            chunk_tokens=chunk_tokens,
+            chunk_overlap=chunk_overlap,
+        )
         for index, text in enumerate(chunks):
             rows.append(
                 {
@@ -147,14 +186,18 @@ def build_chunks(
         pl.col("chunk_char_count").cast(pl.Int32),
         pl.col("embedding_dim").cast(pl.Int32),
     )
-    vectors = embedder.embed(chunks_df.get_column("chunk_text").to_list(), batch_size=batch_size)
+    vectors = embedder.embed(
+        chunks_df.get_column("chunk_text").to_list(), batch_size=batch_size
+    )
     _validate_vectors(vectors)
     return chunks_df.with_columns(
         pl.Series("embedding", vectors, dtype=pl.List(pl.Float32))
     ).select(list(CHUNK_SCHEMA))
 
 
-def chunk_text(text: str, embedder, *, chunk_tokens: int, chunk_overlap: int) -> list[str]:
+def chunk_text(
+    text: str, embedder, *, chunk_tokens: int, chunk_overlap: int
+) -> list[str]:
     token_ids = embedder.tokenizer.encode(text, add_special_tokens=False)
     if not token_ids:
         return []
@@ -170,7 +213,9 @@ def chunk_text(text: str, embedder, *, chunk_tokens: int, chunk_overlap: int) ->
     return chunks
 
 
-def write_silver(pages: pl.DataFrame, chunks: pl.DataFrame, lake_dir: Path) -> tuple[Path, Path]:
+def write_silver(
+    pages: pl.DataFrame, chunks: pl.DataFrame, lake_dir: Path
+) -> tuple[Path, Path]:
     ensure_layers(lake_dir)
     pages_target = silver_pages_path(lake_dir)
     chunks_target = silver_chunks_path(lake_dir)
@@ -191,28 +236,71 @@ def build_silver(
     from amdc_lake.embedder import BgeM3Embedder
 
     bronze = read_bronze(lake_dir)
-    embedder = BgeM3Embedder(device=device)
-    pages = build_pages(bronze, embedder, batch_size=batch_size)
-    chunks = build_chunks(
-        pages,
-        embedder,
-        batch_size=batch_size,
-        chunk_tokens=chunk_tokens,
-        chunk_overlap=chunk_overlap,
+    log.info("silver: read %d bronze rows", bronze.height)
+    pages_rows_in = (
+        bronze.with_columns(
+            pl.col("text")
+            .map_elements(clean_text, return_dtype=pl.Utf8)
+            .alias("_silver_text")
+        )
+        .filter(pl.col("_silver_text").str.len_chars() > 0)
+        .height
     )
+
+    timing_embedder = _TimingEmbedder(BgeM3Embedder(device=device))
+
+    with record_run(
+        "silver_pages", lake_dir, rows_in=pages_rows_in, logger=log
+    ) as page_handle:
+        timing_embedder.reset()
+        pages = build_pages(bronze, timing_embedder, batch_size=batch_size)
+        page_handle.set_rows_out(pages.height)
+        page_handle.update_details(
+            embed_seconds=round(timing_embedder.elapsed_seconds, 3),
+            batch_size=batch_size,
+            model=MODEL_NAME,
+        )
+
+    with record_run(
+        "silver_chunks", lake_dir, rows_in=pages.height, logger=log
+    ) as chunk_handle:
+        timing_embedder.reset()
+        chunks = build_chunks(
+            pages,
+            timing_embedder,
+            batch_size=batch_size,
+            chunk_tokens=chunk_tokens,
+            chunk_overlap=chunk_overlap,
+        )
+        chunk_handle.set_rows_out(chunks.height)
+        chunk_handle.update_details(
+            embed_seconds=round(timing_embedder.elapsed_seconds, 3),
+            batch_size=batch_size,
+            chunk_tokens=chunk_tokens,
+            chunk_overlap=chunk_overlap,
+            model=MODEL_NAME,
+        )
+
     pages_target, chunks_target = write_silver(pages, chunks, lake_dir)
     return pages_target, chunks_target, pages.height, chunks.height
 
 
 def _validate_vectors(vectors: list[list[float]]) -> None:
-    bad = [index for index, vector in enumerate(vectors) if len(vector) != EMBEDDING_DIM]
+    bad = [
+        index for index, vector in enumerate(vectors) if len(vector) != EMBEDDING_DIM
+    ]
     if bad:
-        raise ValueError(f"expected {EMBEDDING_DIM}-dimensional embeddings; bad rows: {bad[:5]}")
+        raise ValueError(
+            f"expected {EMBEDDING_DIM}-dimensional embeddings; bad rows: {bad[:5]}"
+        )
 
 
 def _align_frame(df: pl.DataFrame, schema: dict[str, pl.DataType]) -> pl.DataFrame:
     for name, dtype in schema.items():
         if name not in df.columns:
             df = df.with_columns(pl.lit(None, dtype=dtype).alias(name))
-    casts = [pl.col(name).cast(dtype, strict=False).alias(name) for name, dtype in schema.items()]
+    casts = [
+        pl.col(name).cast(dtype, strict=False).alias(name)
+        for name, dtype in schema.items()
+    ]
     return df.with_columns(casts).select(list(schema))

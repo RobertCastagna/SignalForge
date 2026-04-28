@@ -1,4 +1,5 @@
 """Bronze quality check orchestrator."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -11,7 +12,12 @@ from deltalake import DeltaTable
 
 from amdc_lake.ids import sha256_id
 from amdc_lake.paths import bronze_scrapes_path
-from amdc_lake.quality.checks import compute_run_drift
+from amdc_lake.quality.checks import (
+    EmbedFn,
+    compute_null_counts,
+    compute_run_drift,
+    find_title_duplicate_clusters,
+)
 from amdc_lake.quality.schemas import bronze_schema
 
 
@@ -27,6 +33,8 @@ class QualityResult:
     failures: pl.DataFrame
     check_summary: list[dict] = field(default_factory=list)
     drift_report: list[dict] = field(default_factory=list)
+    null_counts: dict[str, int] = field(default_factory=dict)
+    duplicate_clusters: list[dict] = field(default_factory=list)
     status: str = "pass"
 
 
@@ -54,7 +62,9 @@ def _empty_failure_cases() -> pl.DataFrame:
     )
 
 
-def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) -> pl.DataFrame:
+def _build_failures(
+    df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str
+) -> pl.DataFrame:
     """Join failure_cases (one row per failure) back onto df (one row per failed input row)."""
     row_failures = failure_cases.filter(pl.col("index").is_not_null())
     if row_failures.is_empty():
@@ -65,7 +75,9 @@ def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) 
 
     grouped = (
         row_failures.with_columns(
-            pl.concat_str([pl.col("column"), pl.lit(": "), pl.col("check")]).alias("_reason")
+            pl.concat_str([pl.col("column"), pl.lit(": "), pl.col("check")]).alias(
+                "_reason"
+            )
         )
         .group_by("index")
         .agg(pl.col("_reason").alias("_failure_reasons"))
@@ -74,9 +86,9 @@ def _build_failures(df: pl.DataFrame, failure_cases: pl.DataFrame, run_id: str) 
     df_idx = df.with_row_index(name="_row_index").with_columns(
         pl.col("_row_index").cast(pl.Int32)
     )
-    joined = df_idx.join(grouped, left_on="_row_index", right_on="index", how="inner").drop(
-        "_row_index"
-    )
+    joined = df_idx.join(
+        grouped, left_on="_row_index", right_on="index", how="inner"
+    ).drop("_row_index")
     return joined.with_columns(pl.lit(run_id).alias("_quality_run_id"))
 
 
@@ -91,15 +103,25 @@ def _summarize(failure_cases: pl.DataFrame) -> list[dict]:
     )
 
 
-def _status(rows_failed: int, drift_report: list[dict]) -> str:
+def _status(
+    rows_failed: int,
+    drift_report: list[dict],
+    duplicate_clusters: list[dict],
+) -> str:
     if rows_failed > 0:
         return "fail"
-    if drift_report:
+    if drift_report or duplicate_clusters:
         return "warn"
     return "pass"
 
 
-def run_bronze_checks(df: pl.DataFrame, lake_dir: Path) -> QualityResult:
+def run_bronze_checks(
+    df: pl.DataFrame,
+    lake_dir: Path,
+    *,
+    embed_fn: EmbedFn | None = None,
+    duplicate_threshold: float = 0.95,
+) -> QualityResult:
     started_at = datetime.now(timezone.utc).isoformat()
     run_id = sha256_id("bronze", started_at, prefix="qrun")
 
@@ -113,6 +135,12 @@ def run_bronze_checks(df: pl.DataFrame, lake_dir: Path) -> QualityResult:
     failures = _build_failures(df, failure_cases, run_id)
     check_summary = _summarize(failure_cases)
     drift_report = compute_run_drift(df, _read_existing_bronze(lake_dir))
+    null_counts = compute_null_counts(df)
+    duplicate_clusters: list[dict] = []
+    if embed_fn is not None:
+        duplicate_clusters = find_title_duplicate_clusters(
+            df, embed_fn, threshold=duplicate_threshold
+        )
 
     rows_in = df.height
     rows_failed = failures.height
@@ -130,5 +158,7 @@ def run_bronze_checks(df: pl.DataFrame, lake_dir: Path) -> QualityResult:
         failures=failures,
         check_summary=check_summary,
         drift_report=drift_report,
-        status=_status(rows_failed, drift_report),
+        null_counts=null_counts,
+        duplicate_clusters=duplicate_clusters,
+        status=_status(rows_failed, drift_report, duplicate_clusters),
     )

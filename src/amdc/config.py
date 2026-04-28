@@ -1,4 +1,5 @@
 """Crawler targets and tunables. Edit SITES to swap target domains."""
+
 from __future__ import annotations
 
 SITES: list[dict] = [
@@ -30,20 +31,20 @@ SITES: list[dict] = [
 TEXT_CHAR_CAP: int = 8000
 
 # BestFirst deep-crawl tunables (per site)
-DEEP_CRAWL_MAX_DEPTH: int = 4         # hub → articles → linked articles
-DEEP_CRAWL_MAX_PAGES: int = 60         # ceiling per site
+DEEP_CRAWL_MAX_DEPTH: int = 4  # hub → articles → linked articles
+DEEP_CRAWL_MAX_PAGES: int = 60  # ceiling per site
 # Post-fetch gate: keep a page if EITHER raw body clears MIN_RAW or BM25-trimmed
 # body clears MIN_FIT. Two floors so over-aggressive BM25 trim on long articles
 # doesn't drop them.
 MIN_FIT_MARKDOWN_CHARS: int = 200
 MIN_RAW_MARKDOWN_CHARS: int = 800
-CONCURRENCY_PER_SITE: int = 10        # parallel page fetches inside one site's deep crawl
+CONCURRENCY_PER_SITE: int = 10  # parallel page fetches inside one site's deep crawl
 
 # Cross-site parallelism
-PARALLEL_SITES: bool = True            # asyncio.gather across SITES instead of sequential
+PARALLEL_SITES: bool = True  # asyncio.gather across SITES instead of sequential
 
 # Content filter + stealth
 BM25_THRESHOLD: float = 0.3
-PAGE_TIMEOUT_MS: int = 20_000          # per-page browser timeout
-STEALTH: bool = True                   # keep magic + override_navigator
-SIMULATE_USER: bool = False            # disabled: mouse-move overhead rarely changes outcome
+PAGE_TIMEOUT_MS: int = 20_000  # per-page browser timeout
+STEALTH: bool = True  # keep magic + override_navigator
+SIMULATE_USER: bool = False  # disabled: mouse-move overhead rarely changes outcome

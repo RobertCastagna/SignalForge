@@ -55,7 +55,7 @@ def main() -> int:
         )
 
     print("\nPreview:")
-    with pl.Config(tbl_rows=-1, tbl_cols=-1, fmt_str_lengths=200, tbl_width_chars=200):
+    with pl.Config(tbl_rows=-1, tbl_cols=-1, fmt_str_lengths=800, tbl_width_chars=200):
         print(preview)
 
     return 0
