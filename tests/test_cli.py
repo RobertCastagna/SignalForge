@@ -25,9 +25,13 @@ class _FakeTokenizer:
     def decode(self, token_ids: list[int], *, skip_special_tokens: bool = True) -> str:
         return " ".join(f"tok{token_id}" for token_id in token_ids)
 
+    def num_special_tokens_to_add(self, pair: bool = False) -> int:
+        return 0
+
 
 class _FakeEmbedder:
     tokenizer = _FakeTokenizer()
+    max_length = 512
 
     def embed(self, texts: list[str], *, batch_size: int = 8) -> list[list[float]]:
         return [[float(i)] + [0.0] * (EMBEDDING_DIM - 1) for i, _ in enumerate(texts)]

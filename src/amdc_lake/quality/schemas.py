@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
 import pandera.polars as pa
 import polars as pl
 from pandera.polars import Column, DataFrameSchema
 
-from amdc.config import BM25_THRESHOLD, SITES, TEXT_CHAR_CAP
+from amdc.config import BM25_THRESHOLD, TEXT_CHAR_CAP
 from amdc_lake.quality.checks import text_is_not_error_page, text_passes_junk
-
-
-def _allowed_domains() -> list[str]:
-    """Derive allowed root domains from amdc.config.SITES."""
-    return sorted({urlparse(site["url"]).netloc.removeprefix("www.") for site in SITES})
 
 
 def bronze_schema() -> DataFrameSchema:
@@ -33,7 +26,6 @@ def bronze_schema() -> DataFrameSchema:
             ),
             "source_domain": Column(
                 pl.Utf8,
-                checks=[pa.Check.isin(_allowed_domains())],
                 nullable=False,
             ),
             "title": Column(
