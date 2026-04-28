@@ -253,7 +253,7 @@ def _render_search_tab() -> None:
         query = st.text_input(
             "Search",
             max_chars=200,
-            placeholder="fed fund rate or Canada EU relations",
+            placeholder="impact of oil on fed fund rate or Canada and European Union relations surrounding US tarrifs on steel imports",
         )
         no_crawl = st.checkbox("No crawl", value=False)
         threshold = st.select_slider(
