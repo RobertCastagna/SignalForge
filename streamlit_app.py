@@ -267,7 +267,7 @@ digraph {
 def _render_header() -> None:
     st.title("Adaptive Market Data Crawler")
     st.write(
-        "This tool is build to assist a researcher who is looking to retrieve sample data for building an NLP pipeline."
+        "This tool is built to assist a researcher who is looking to retrieve sample data for building an NLP pipeline."
     )
     st.write(
         "It lets you search existing market articles in the AMDC lakehouse. When cached matches are "
