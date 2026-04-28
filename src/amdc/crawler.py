@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from time import perf_counter
 from urllib.parse import urlparse
 
 from crawl4ai import (
@@ -119,12 +120,17 @@ def _build_run_config(site: dict, query: str) -> CrawlerRunConfig:
     )
 
 
-async def _crawl_one(crawler: AsyncWebCrawler, site: dict, query: str) -> list[dict]:
+async def _crawl_one(
+    crawler: AsyncWebCrawler, site: dict, query: str
+) -> tuple[list[dict], dict]:
     start_url = site["url"]
     netloc = _domain(start_url)
     run_cfg = _build_run_config(site, query)
+    started = perf_counter()
 
     out: list[dict] = []
+    pages_dropped = 0
+    error: str | None = None
     try:
         async for result in await crawler.arun(url=start_url, config=run_cfg):
             if not getattr(result, "success", False):
@@ -137,6 +143,7 @@ async def _crawl_one(crawler: AsyncWebCrawler, site: dict, query: str) -> list[d
             # BM25-filtered body has enough query-relevant content. Gating on
             # fit alone drops long articles where BM25 over-trims.
             if len(raw) < MIN_RAW_MARKDOWN_CHARS and len(fit) < MIN_FIT_MARKDOWN_CHARS:
+                pages_dropped += 1
                 continue
             metadata = getattr(result, "metadata", None) or {}
             score = metadata.get("score") if isinstance(metadata, dict) else None
@@ -153,10 +160,31 @@ async def _crawl_one(crawler: AsyncWebCrawler, site: dict, query: str) -> list[d
             )
     except Exception as exc:
         log.error("site failed (%s): %s", start_url, exc, exc_info=True)
-    return out
+        error = repr(exc)[:500]
+
+    duration_ms = int((perf_counter() - started) * 1000)
+    pages_kept = len(out)
+    stats = {
+        "site": netloc,
+        "start_url": start_url,
+        "pages_fetched": pages_kept + pages_dropped,
+        "pages_kept": pages_kept,
+        "pages_dropped": pages_dropped,
+        "duration_ms": duration_ms,
+        "error": error,
+    }
+    log.info(
+        "site=%s pages_kept=%d pages_dropped=%d duration_ms=%d error=%s",
+        netloc,
+        pages_kept,
+        pages_dropped,
+        duration_ms,
+        error,
+    )
+    return out, stats
 
 
-async def crawl_all(query: str) -> list[dict]:
+async def crawl_all(query: str) -> tuple[list[dict], list[dict]]:
     browser = BrowserConfig(
         headless=True,
         viewport_width=1920,
@@ -179,10 +207,24 @@ async def crawl_all(query: str) -> list[dict]:
                 per_site.append(await _crawl_one(crawler, site, query))
 
     results: list[dict] = []
+    site_stats: list[dict] = []
     for site, res in zip(SITES, per_site):
         if isinstance(res, Exception):
             log.error("site task raised (%s): %s", site["url"], res)
+            site_stats.append(
+                {
+                    "site": _domain(site["url"]),
+                    "start_url": site["url"],
+                    "pages_fetched": 0,
+                    "pages_kept": 0,
+                    "pages_dropped": 0,
+                    "duration_ms": 0,
+                    "error": repr(res)[:500],
+                }
+            )
             continue
-        log.info("got %d pages from %s", len(res), site["url"])
-        results.extend(res)
-    return results
+        records, stats = res
+        log.info("got %d pages from %s", len(records), site["url"])
+        results.extend(records)
+        site_stats.append(stats)
+    return results, site_stats
