@@ -17,6 +17,73 @@ auto-triggers a fresh crawl + Bronze + Silver build when the cache is thin.
 Every stage records a durable run row to `_pipeline/runs` so timing, row counts,
 and per-site / per-batch detail are inspectable after the fact.
 
+## Run locally
+
+From a fresh clone, use these exact commands.
+
+Install `uv` if your machine does not already have it:
+
+```bash
+command -v uv || curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+If that command installed `uv`, close and reopen your terminal before running
+the next commands.
+
+Clone the repo and enter it:
+
+```bash
+git clone https://github.com/RobertCastagna/SignalForge.git
+cd SignalForge
+```
+
+Create the local Python environment from `pyproject.toml` and `uv.lock`.
+This creates `.venv/` and installs the Python packages the app needs:
+
+```bash
+uv sync --python 3.12
+```
+
+Turn on the virtualenv in your current terminal:
+
+```bash
+source .venv/bin/activate
+```
+
+Install Chromium, which `crawl4ai` uses to crawl websites:
+
+```bash
+uv run playwright install chromium
+```
+
+Start the Streamlit UI:
+
+```bash
+uv run streamlit run streamlit_app.py
+```
+
+Open `http://localhost:8501`. The Streamlit app provides query search,
+optional crawl, Bronze/Silver rebuilds, result display, and Data Quality run
+history. Long crawls stream progress to the console running Streamlit.
+
+The first crawl creates local output under `data/`, including raw parquet
+files, Delta Lake tables, pipeline runs, and quality runs.
+
+Shortcut: after cloning and entering the repo, this helper runs the setup
+commands for you:
+
+```bash
+python3 setup.py
+source .venv/bin/activate
+uv run streamlit run streamlit_app.py
+```
+
+To run setup and immediately start Streamlit:
+
+```bash
+python3 setup.py --start
+```
+
 ## Stack
 
 - Python 3.12 in `python:3.12-slim-bookworm`
@@ -28,7 +95,7 @@ and per-site / per-batch detail are inspectable after the fact.
 - Hugging Face `transformers` + PyTorch for BAAI/bge-small-en-v1.5 embeddings
 - `typer` for the CLI
 
-## Build
+## Docker build
 
 ```bash
 docker build -t market-crawler .
@@ -161,7 +228,7 @@ caps text at 200 characters, exposes `no_crawl` and `threshold`, keeps
 `min_articles=10` and `top_k=20`, and displays matches in an interactive
 dataframe. The Data Quality tab reads `_quality/runs`, sorts runs newest-first,
 and turns nested check, drift, null, and duplicate-cluster JSON into readable
-columns with sidebar filters.
+columns with sidebar controls for row count and raw JSON details.
 
 Docker runs the same UI by default:
 
@@ -272,7 +339,8 @@ skip.
 ## Local development without Docker
 
 ```bash
-uv sync
+uv sync --python 3.12
+source .venv/bin/activate
 uv run playwright install chromium
 
 # Crawl. --lake-dir is optional; when set, the run is recorded to _pipeline/runs.
