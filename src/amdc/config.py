@@ -32,7 +32,7 @@ TEXT_CHAR_CAP: int = 8000
 
 # BestFirst deep-crawl tunables (per site)
 DEEP_CRAWL_MAX_DEPTH: int = 4  # hub → articles → linked articles
-DEEP_CRAWL_MAX_PAGES: int = 60  # ceiling per site
+DEEP_CRAWL_MAX_PAGES: int = 100  # ceiling per site
 # Post-fetch gate: keep a page if EITHER raw body clears MIN_RAW or BM25-trimmed
 # body clears MIN_FIT. Two floors so over-aggressive BM25 trim on long articles
 # doesn't drop them.
